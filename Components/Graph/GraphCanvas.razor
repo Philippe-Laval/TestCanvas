@@ -250,6 +250,21 @@
     }
 
     /// <summary>Centre du canvas expressed dans le repère du graphe.</summary>
+    /// <summary>
+    /// Recale un élément flottant (menu contextuel) à l'intérieur du canvas en
+    /// mesurant sa taille réelle. À appeler après le rendu de l'élément, sinon
+    /// sa taille vaut 0 et le placement est faux.
+    /// </summary>
+    public async Task<GraphPoint?> PlacePopupAsync(ElementReference popup, double x, double y)
+    {
+        if (!_ready || _module is null || !HasCanvas)
+        {
+            return null;
+        }
+
+        return await _module.InvokeAsync<GraphPoint?>("placePopup", _canvas, popup, x, y);
+    }
+
     public async Task<GraphPoint> GetCenterAsync()
     {
         if (!_ready || _module is null || !HasCanvas)

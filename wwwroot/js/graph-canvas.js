@@ -81,6 +81,7 @@ class GraphCanvas {
             nodeBorderWidth: 2,
             parallelEdgeSpread: 0.16,
             allowSelfLoops: false,
+            popupMargin: 200,
             selectionColor: '#38bdf8',
             fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
             theme: {
@@ -1222,14 +1223,23 @@ class GraphCanvas {
         const node = this.hitTestNode(point.x, point.y);
         const edge = node ? null : this.hitTestEdge(point.x, point.y);
 
+        // Position du menu, arrondie en pixels et ramenée dans le canvas : un
+        // clic près du bord droit ou bas ne doit pas faire déborder le menu.
+        // La marge est la taille maximale du menu, minorée de 8 px de sécurité.
+        const margin = Math.max(this.options.popupMargin - 8, 0);
+        const maxX = Math.max(0, rect.width - margin);
+        const maxY = Math.max(0, rect.height - margin);
+        const offsetX = clamp(event.clientX - rect.left, 0, maxX);
+        const offsetY = clamp(event.clientY - rect.top, 0, maxY);
+
         this.emit(
             'NotifyContextMenu',
             node ? node.id : (edge ? edge.id : null),
             node ? 'node' : (edge ? 'edge' : 'canvas'),
             Math.round(point.x),
             Math.round(point.y),
-            event.clientX - rect.left,
-            event.clientY - rect.top
+            Math.round(offsetX),
+            Math.round(offsetY)
         );
     }
 
@@ -2024,6 +2034,30 @@ export function getEdgeGeometries(canvas) {
             midY: geometry ? Math.round(geometry.label.y) : null
         };
     }));
+}
+
+/**
+ * Positionne un menu flottant dans le canvas en mesurant sa taille réelle.
+ * Indispensable près des bords : une marge estimée serait fausse, et un menu
+ * débordant hors du canvas finit sous la barre d'outils.
+ */
+export function placePopup(canvas, popup, x, y) {
+    if (!popup) {
+        return null;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const width = popup.offsetWidth;
+    const height = popup.offsetHeight;
+
+    const left = clamp(x, 0, Math.max(0, rect.width - width));
+    const top = clamp(y, 0, Math.max(0, rect.height - height));
+
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(top)}px`;
+    popup.style.visibility = 'visible';
+
+    return { left: Math.round(left), top: Math.round(top) };
 }
 
 export function screenToGraph(canvas, offsetX, offsetY) {

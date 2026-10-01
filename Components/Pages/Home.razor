@@ -138,7 +138,7 @@
             @if (_contextMenu is not null)
             {
                 <div class="context-menu"
-                     style="left:@(_contextMenu.OffsetX)px; top:@(_contextMenu.OffsetY)px"
+                     @ref="_contextMenuRef"
                      @oncontextmenu:preventDefault="true">
                     @if (_contextMenu.Kind == "node" && _graph.FindNode(_contextMenu.Id) is { } target)
                     {
@@ -372,6 +372,8 @@
     private GraphCanvasOptions _options = new();
     private GraphNode? _selectedNode;
     private GraphContextMenuEvent? _contextMenu;
+    private ElementReference _contextMenuRef;
+    private bool _pendingMenuPlacement;
     private string _json = string.Empty;
     private bool _snapToGrid;
     private bool _showGrid = true;
@@ -400,23 +402,38 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender)
+        if (firstRender)
+        {
+            // Le canvas se construit après le premier rendu de la page : on attend
+            // son signal « prêt » pour recadrer la vue.
+            if (_canvas is not null)
+            {
+                _canvas.Ready += OnCanvasReady;
+
+                if (_canvas.IsReady)
+                {
+                    await OnCanvasReadyAsync();
+                }
+            }
+        }
+
+        // Le menu contextuel doit être mesuré une fois rendu : sa taille réelle
+        // est la seule chose qui permette de l'empêcher de déborder du canvas
+        // près des bords. À chaque rendu, pas seulement au premier.
+        if (!_pendingMenuPlacement || _canvas is null || _contextMenu is null)
         {
             return;
         }
 
-        // Le canvas se construit après le premier rendu de la page : on attend
-        // son signal « prêt » pour recadrer la vue.
-        if (_canvas is null)
+        _pendingMenuPlacement = false;
+
+        try
         {
-            return;
+            await _canvas.PlacePopupAsync(_contextMenuRef, _contextMenu.OffsetX, _contextMenu.OffsetY);
         }
-
-        _canvas.Ready += OnCanvasReady;
-
-        if (_canvas.IsReady)
+        catch (JSDisconnectedException)
         {
-            await OnCanvasReadyAsync();
+            // Circuit coupé : le menu part avec la page.
         }
     }
 
@@ -832,6 +849,7 @@ private void SelectAll()
     private void OnContextMenu(GraphContextMenuEvent e)
     {
         _contextMenu = e;
+        _pendingMenuPlacement = true;
 
         if (e.Kind == "node")
         {

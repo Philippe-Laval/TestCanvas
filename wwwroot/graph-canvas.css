@@ -349,8 +349,17 @@ html, body {
 
 .context-menu {
     position: absolute;
+    /* Avant le placement JS, le menu est masqué : sa taille n'est pas encore
+       connue et il apparaîtrait sous le canvas, hors de la zone visible. */
+    top: 0;
+    left: 0;
+    visibility: hidden;
     z-index: 40;
     min-width: 12rem;
+    /* Un clic près du bord ne doit pas faire déborder le menu hors du canvas. */
+    max-width: min(22rem, calc(100% - 1rem));
+    max-height: calc(100% - 1rem);
+    overflow-y: auto;
     background: #1e293b;
     border: 1px solid #334155;
     border-radius: 8px;

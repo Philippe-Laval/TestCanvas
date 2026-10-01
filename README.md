@@ -85,6 +85,7 @@ avant par le canvas et affiché par l'inspecteur.
 | `fitToView`, `zoomBy`, `setZoom`, `resetView`, `focusNode` | gestion de la vue |
 | `screenToGraph`, `getCenter` | conversions de coordonnées |
 | `getView`, `setView`, `resize` | état de la vue et redimensionnement |
+| `placePopup` | replace un menu flottant dans le canvas, après mesure de sa taille |
 | `toDataUrl`, `downloadPng` | export image |
 
 ## Manipuler le graphe depuis C#
@@ -175,7 +176,7 @@ glisser, et le document est replacé dans le même état — pas de boucle.
 | `Maj`+clic | ajouter / retirer de la sélection |
 | `Maj`+glisser | sélection rectangulaire |
 | `Ctrl`+glisser depuis un nœud | créer une arête |
-| Clic droit | menu contextuel (nœud, arête, canvas) |
+| Clic droit | menu contextuel (nœud, arête, canvas), repositionné dans le canvas après mesure |
 | Double-clic | renommer un nœud / en ajouter un |
 | `Suppr` | supprimer la sélection |
 | `F2` | suffixe de libellé |
