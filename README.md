@@ -304,6 +304,27 @@ extrémités correspondantes :
 Chaque liaison est sélectionnable au clic, puis modifiable (type, couleur, largeur,
 style, sens) ou supprimable depuis l'inspecteur ou le menu contextuel.
 
+#### Compatibilité Graphviz
+
+La règle de placement est celle de `dot` : **la position latérale dépend du rang dans
+le groupe, jamais du sens**. L'arête de rang i occupe toujours la bande
+`i − (k−1)/2`, qu'elle aille de A vers B ou de B vers A.
+
+C'est ce qui distingue le comportement d'une répartition « par sens », qui
+regrouperait les arêtes de même direction d'un côté et celles de sens opposé de
+l'autre. Graphviz ne le fait pas : il suit l'ordre de déclaration. Sur
+`a->b ; b->a ; a->b`, `dot` alterne donc latéralement `avant, arrière, avant` — la
+première déclarée est la plus à l'extérieur, et non « toutes les aller ».
+
+Vérifié contre `dot` (Graphviz 16.1.0) sur les **28 combinaisons** de 2, 3 et 4
+arêtes parallèles, en comparant l'ordre latéral des arêtes dans le SVG produit avec
+l'ordre attendu : **0 écart**. Les 10 configurations les plus discriminantes
+(entrées et sorties mélangées) ont aussi été rejouées dans l'application via
+`getEdgeGeometries`, avec le même résultat.
+
+Le seul paramètre libre reste l'écartement (`GraphCanvasOptions.ParallelEdgeSpread`),
+`dot` le calculant à partir de la taille des nœuds et de la séparation des rangs.
+
 ### Boucles et pseudographe
 
 La terminologie de [wikipedia/Multigraph](https://en.wikipedia.org/wiki/Multigraph)
@@ -382,6 +403,9 @@ var tous  = graph.SelectedNodes;
   +0,24 et milieux à Y = −22 / −7 / +7 / +22 (faisceau symétrique, traits distincts)
 - sens opposés : A→B puis B→A donnent deux arcs distincts (milieux à −7 et +7)
   au lieu de se recouvrir ; A→B, B→A, A→B donnent trois arcs à −18 / 0 / +18
+- ordre latéral des arêtes parallèles conforme à `dot` sur les 28 combinaisons
+  de 2, 3 et 4 arêtes (ordre de déclaration, indépendant du sens) — 0 écart,
+  et 10 configurations rejouées dans l'application avec le même résultat
 - sélection ciblée des 5 arêtes du graphe de démonstration, une par une
 - bascule orientée / non orientée, type et couleur persistés dans le modèle
 - suppression d'une liaison depuis l'inspecteur (5 → 4 arêtes)

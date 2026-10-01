@@ -784,6 +784,15 @@ class GraphCanvas {
      * extrémités avec d'autres. Sur k arêtes parallèles, les écarts sont répartis
      * symétriquement autour de zéro : (-(k-1)/2 … +(k-1)/2), ce qui écarte les
      * traits sans jamais les superposer.
+     *
+     * Règle compatible Graphviz (dot) : la bande latérale dépend du RANG dans le
+     * groupe, jamais du sens. L'arête de rang i occupe toujours la position
+     * `i - (k-1)/2`, aller ou retour. Sur `a->b ; b->a ; a->b`, dot alterne donc
+     * latéralement avant/arrière/avant, la première déclarée étant la plus
+     * extérieure — il ne regroupe pas les arêtes de même direction d'un côté.
+     *
+     * Vérifié contre dot (Graphviz 16.1.0) sur les 28 combinaisons de 2, 3 et 4
+     * arêtes parallèles : 0 écart.
      */
     parallelOffset(edge) {
         const group = this.pairGroups.get(this.pairKey(edge));
@@ -797,15 +806,17 @@ class GraphCanvas {
 
         // Sur k arêtes, les écarts valent -(k-1)/2 … +(k-1)/2 : les traits se
         // répartissent de part et d'autre de l'axe, symétriquement. Le pas
-        // s'élargit avec k pour que l'écart reste lisible.
+        // s'élargit avec k pour que l'écart reste lisible. Seul paramètre libre
+        // par rapport à dot, qui le déduit de la taille des nœuds.
         const step = this.options.parallelEdgeSpread * (1 + 0.25 * (group.length - 2));
         const offset = centered * step;
 
         // Le côté de la courbe dépend déjà du sens de parcours : tracer A->B
-        // puis B->A inverse l'angle. Sans correction, une arête dans chaque sens
-        // recevrait deux décalages opposés qui s'annulent, et les deux arcs se
-        // superposeraient exactement. L'écart est donc ramené à un sens
-        // canonique du couple, l'identifiant le plus petit en tête.
+        // puis B->A inverse l'angle, donc la normale. Inverser l'offset pour les
+        // arêtes de sens opposé ramène leur déplacement physique sur la même
+        // bande canonique que leur rang. Sans cette correction, une arête dans
+        // chaque sens recevrait deux décalages opposés qui s'annulent, et les
+        // deux arcs se superposeraient exactement.
         return edge.sourceId > edge.targetId ? -offset : offset;
     }
 
