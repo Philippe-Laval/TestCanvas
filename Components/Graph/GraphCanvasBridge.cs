@@ -21,8 +21,8 @@ public sealed class GraphCanvasBridge
         => Canvas?.NotifySelectionChangedAsync(nodeIds, edgeId) ?? Task.CompletedTask;
 
     [JSInvokable]
-    public Task NotifyLinkRequested(string sourceId, string targetId)
-        => Canvas?.NotifyLinkRequestedAsync(sourceId, targetId) ?? Task.CompletedTask;
+    public Task NotifyLinkRequested(string sourceId, string targetId, bool isLoop)
+        => Canvas?.NotifyLinkRequestedAsync(sourceId, targetId, isLoop) ?? Task.CompletedTask;
 
     [JSInvokable]
     public Task NotifyNodeDoubleClicked(string nodeId)
@@ -136,6 +136,12 @@ public sealed class GraphCanvasOptions
     /// </summary>
     public double ParallelEdgeSpread { get; set; } = 0.16;
 
+    /// <summary>
+    /// Autorise le glisser depuis un nœud vers lui-même pour créer une boucle
+    /// (pseudographe). Doit rester cohérent avec <c>GraphDocument.AllowSelfLoops</c>.
+    /// </summary>
+    public bool AllowSelfLoops { get; set; }
+
     /// <summary>Couleur de la sélection (halo).</summary>
     public string SelectionColor { get; set; } = "#38bdf8";
 
@@ -159,6 +165,7 @@ public sealed class GraphCanvasOptions
         ["maxZoom"] = MaxZoom,
         ["nodeBorderWidth"] = NodeBorderWidth,
         ["parallelEdgeSpread"] = ParallelEdgeSpread,
+        ["allowSelfLoops"] = AllowSelfLoops,
         ["selectionColor"] = SelectionColor,
         ["fontFamily"] = FontFamily,
         ["theme"] = new Dictionary<string, object?>(StringComparer.Ordinal)

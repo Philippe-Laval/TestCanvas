@@ -33,6 +33,35 @@ function distanceToSegment(px, py, ax, ay, bx, by) {
     return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
+/**
+ * Échantillonne une géométrie en polyline : nécessaire pour tester la distance
+ * à une courbe, l'approximation par les seuls points de contrôle étant trop
+ * grossière (cas des boucles).
+ */
+function sampleGeometry(geometry, segments = 12) {
+    if (geometry.type === 'line') {
+        return geometry.points.slice(0, 2);
+    }
+
+    if (geometry.type === 'curve') {
+        const [p0, ctrl, p1] = geometry.points;
+        const samples = [];
+
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const inv = 1 - t;
+            samples.push({
+                x: inv * inv * p0.x + 2 * inv * t * ctrl.x + t * t * p1.x,
+                y: inv * inv * p0.y + 2 * inv * t * ctrl.y + t * t * p1.y
+            });
+        }
+
+        return samples;
+    }
+
+    return geometry.points;
+}
+
 /* ------------------------------------------------------------------- GraphCanvas */
 
 class GraphCanvas {
@@ -51,6 +80,7 @@ class GraphCanvas {
             panSpeed: 1,
             nodeBorderWidth: 2,
             parallelEdgeSpread: 0.16,
+            allowSelfLoops: false,
             selectionColor: '#38bdf8',
             fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
             theme: {
@@ -74,8 +104,10 @@ class GraphCanvas {
         this.edges = new Map();
 
         // Arêtes partageant le même couple de nœuds (multigraphe), recalculé à
-        // chaque modification du document.
+        // chaque modification du document. Les boucles sont indexées à part,
+        // par nœud.
         this.pairGroups = new Map();
+        this.loopGroups = new Map();
 
         this.view = { x: 0, y: 0, zoom: 1 };
         this.dpr = window.devicePixelRatio || 1;
@@ -592,6 +624,11 @@ class GraphCanvas {
 
         const group = this.pairGroups.get(this.pairKey(edge));
 
+        // Boucle : arête d'un nœud à lui-même, dessinée en goutte à l'extérieur.
+        if (edge.sourceId === edge.targetId) {
+            return this.computeLoop(edge);
+        }
+
         // Multigraphe : la courbure dépend du seul rang dans le faisceau. La
         // courbure propre de l'arête est ignorée ici, sinon le faisceau se
         // décalerait d'un bord à l'autre au lieu de rester symétrique.
@@ -600,6 +637,112 @@ class GraphCanvas {
         }
 
         return this.computePath(source, target, edge.style, edge.curvature);
+    }
+
+    /**
+     * Géométrie d'une boucle : l'arête quitte le nœud par un angle, en revient
+     * par l'angle symétrique, en formant une goutte à l'extérieur.
+     */
+    computeLoop(edge) {
+        const node = this.nodes.get(edge.sourceId);
+
+        if (!node) {
+            return null;
+        }
+
+        const loops = this.loopGroups.get(edge.sourceId) || [];
+        const index = Math.max(0, loops.indexOf(edge.id));
+        const theta = this.loopAngle(node, index, loops.length);
+        const r = node.radius;
+        const half = Math.min(0.8, 0.35 + 0.12 * loops.length);
+        const bulge = r * (1.15 + 0.35 * index);
+
+        // Les ancrages suivent la frontière réelle de la forme : sur un carré
+        // ou un losange, un rayon circulaire ferait mordre la boucle dans le nœud.
+        const r1 = this.boundaryDistance(node, theta - half);
+        const r2 = this.boundaryDistance(node, theta + half);
+
+        const p1 = { x: node.x + r1 * Math.cos(theta - half), y: node.y + r1 * Math.sin(theta - half) };
+        const p2 = { x: node.x + r2 * Math.cos(theta + half), y: node.y + r2 * Math.sin(theta + half) };
+        const ctrl = {
+            x: node.x + (r + bulge) * Math.cos(theta),
+            y: node.y + (r + bulge) * Math.sin(theta)
+        };
+
+        return {
+            type: 'curve',
+            loop: true,
+            points: [p1, ctrl, p2],
+            label: {
+                x: 0.25 * p1.x + 0.5 * ctrl.x + 0.25 * p2.x,
+                y: 0.25 * p1.y + 0.5 * ctrl.y + 0.25 * p2.y
+            },
+            // Tangente en fin de courbe : c'est elle qui oriente la flèche.
+            angle: Math.atan2(p2.y - ctrl.y, p2.x - ctrl.x)
+        };
+    }
+
+    /**
+     * Distance du centre à la frontière de la forme dans une direction donnée.
+     * Inverse de <see cref="isPointInNode"/> pour les formes polygonales.
+     */
+    boundaryDistance(node, angle) {
+        const r = node.radius;
+        const cos = Math.abs(Math.cos(angle));
+        const sin = Math.abs(Math.sin(angle));
+
+        switch (node.shape) {
+            case 'Square':
+                return r / Math.max(cos, sin, 1e-6);
+            case 'RoundedRectangle': {
+                const w = r * 1.25;
+                const h = r * 0.8;
+                return Math.min(w / Math.max(cos, 1e-6), h / Math.max(sin, 1e-6));
+            }
+            case 'Diamond':
+                return r / Math.max(cos + sin, 1e-6);
+            case 'Hexagon':
+                // Dodécagone approché : apothème r·cos(30°) sur une face.
+                return (r * Math.cos(Math.PI / 6))
+                    / Math.max(cos * Math.cos(Math.PI / 6) + sin * Math.sin(Math.PI / 6), 1e-6);
+            case 'Triangle':
+                return r / Math.max(cos + sin * 0.5, 1e-6);
+            case 'Circle':
+            default:
+                return r;
+        }
+    }
+
+    /**
+     * Angle d'une boucle. La direction de base pointe à l'opposé du barycentre
+     * des voisins, pour que la boucle reste dans l'espace libre ; les boucles
+     * suivantes d'un même nœud sont écartées en éventail.
+     */
+    loopAngle(node, index, count) {
+        let base = -Math.PI / 2;
+        let sumX = 0;
+        let sumY = 0;
+
+        for (const edge of this.edges.values()) {
+            let other = null;
+
+            if (edge.sourceId === node.id && edge.targetId !== node.id) {
+                other = this.nodes.get(edge.targetId);
+            } else if (edge.targetId === node.id && edge.sourceId !== node.id) {
+                other = this.nodes.get(edge.sourceId);
+            }
+
+            if (other) {
+                sumX += other.x;
+                sumY += other.y;
+            }
+        }
+
+        if (sumX !== 0 || sumY !== 0) {
+            base = Math.atan2(node.y - sumY, node.x - sumX);
+        }
+
+        return base + (index - (count - 1) / 2) * 0.85;
     }
 
     /**
@@ -640,8 +783,18 @@ class GraphCanvas {
     /** Recalcule le groupement des arêtes parallèles (invalidé à chaque changement). */
     rebuildPairGroups() {
         const groups = new Map();
+        const loops = new Map();
 
         for (const edge of this.edges.values()) {
+            if (edge.sourceId === edge.targetId) {
+                if (!loops.has(edge.sourceId)) {
+                    loops.set(edge.sourceId, []);
+                }
+
+                loops.get(edge.sourceId).push(edge.id);
+                continue;
+            }
+
             const key = this.pairKey(edge);
             if (!groups.has(key)) {
                 groups.set(key, []);
@@ -651,6 +804,7 @@ class GraphCanvas {
         }
 
         this.pairGroups = groups;
+        this.loopGroups = loops;
         this.invalidate();
     }
 
@@ -735,18 +889,14 @@ class GraphCanvas {
                 continue;
             }
 
-            const points = geometry.points;
-            let distance = Infinity;
+            const points = sampleGeometry(geometry);
 
-            if (geometry.type === 'line') {
-                distance = distanceToSegment(gx, gy, points[0].x, points[0].y, points[1].x, points[1].y);
-            } else {
-                for (let i = 0; i < points.length - 1; i++) {
-                    distance = Math.min(
-                        distance,
-                        distanceToSegment(gx, gy, points[i].x, points[i].y, points[i + 1].x, points[i + 1].y)
-                    );
-                }
+            let distance = Infinity;
+            for (let i = 0; i < points.length - 1; i++) {
+                distance = Math.min(
+                    distance,
+                    distanceToSegment(gx, gy, points[i].x, points[i].y, points[i + 1].x, points[i + 1].y)
+                );
             }
 
             if (distance < bestDistance) {
@@ -1009,8 +1159,13 @@ class GraphCanvas {
 
         if (previousMode === 'link' && this.linkStartId) {
             const target = this.hitTestNode(point.x, point.y);
-            if (target && target.id !== this.linkStartId) {
-                this.emit('NotifyLinkRequested', this.linkStartId, target.id);
+
+            // Relâcher sur le nœud de départ crée une boucle, si le mode
+            // pseudographe est autorisé.
+            const isLoop = target && target.id === this.linkStartId;
+
+            if (target && (target.id !== this.linkStartId || this.options.allowSelfLoops)) {
+                this.emit('NotifyLinkRequested', this.linkStartId, target.id, !!isLoop);
             }
 
             this.linkStartId = null;
@@ -1863,6 +2018,7 @@ export function getEdgeGeometries(canvas) {
             sourceId: edge.sourceId,
             targetId: edge.targetId,
             parallelOffset: Number(instance.parallelOffset(edge).toFixed(4)),
+            isLoop: edge.sourceId === edge.targetId,
             type: geometry ? geometry.type : null,
             midX: geometry ? Math.round(geometry.label.x) : null,
             midY: geometry ? Math.round(geometry.label.y) : null

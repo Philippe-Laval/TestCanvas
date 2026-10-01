@@ -551,6 +551,18 @@ html, body {
     color: #fff;
 }
 
+.degree {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.78rem;
+}
+
+.degree .muted {
+    color: #64748b;
+    font-size: 0.72rem;
+}
+
 .edge-ends {
     display: inline-flex;
     align-items: center;

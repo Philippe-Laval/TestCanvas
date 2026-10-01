@@ -102,6 +102,10 @@
             <input type="checkbox" checked="@_showGrid" @onchange="OnGridChanged" />
             Grille
         </label>
+        <label class="toggle" title="Autorise les arêtes d'un nœud à lui-même (pseudographe)">
+            <input type="checkbox" checked="@_graph.AllowSelfLoops" @onchange="OnSelfLoopsChanged" />
+            Boucles
+        </label>
         <span class="separator"></span>
         <button class="btn" @onclick="ZoomIn" title="Zoom avant">+</button>
         <button class="btn" @onclick="ZoomOut" title="Zoom arrière">&minus;</button>
@@ -143,6 +147,10 @@
                         <button @onclick="() => ContextRandomizeColor(target)">Couleur aléatoire</button>
                         <button @onclick="() => ContextToggleLock(target)">@(target.Locked ? "Déverrouiller" : "Verrouiller")</button>
                         <button @onclick="() => ContextToggleShape(target)">Changer de forme</button>
+                        @if (_graph.AllowSelfLoops)
+                        {
+                            <button @onclick="() => ContextAddLoop(target)">Ajouter une boucle</button>
+                        }
                         <hr />
                         <button class="danger" @onclick="() => ContextDeleteNode(target)">Supprimer</button>
                     }
@@ -209,6 +217,28 @@
                         <dd><input class="input" type="range" min="12" max="70" value="@Num(node.Radius)" @oninput="e => UpdateRadius(node, e.Value?.ToString())" /></dd>
                         <dt>Verrouillé</dt>
                         <dd><input type="checkbox" checked="@node.Locked" @onchange="e => ToggleLock(node, e.Value)" /></dd>
+                        <dt>Degré</dt>
+                        <dd class="degree">
+                            <span title="Degré total (pseudographe : une boucle compte deux fois)">@_graph.Degree(node.Id)</span>
+                            <span class="muted" title="Arêtes sortantes">→ @_graph.OutDegree(node.Id)</span>
+                            <span class="muted" title="Arêtes entrantes">← @_graph.InDegree(node.Id)</span>
+                        </dd>
+                        @if (_graph.LoopsOf(node.Id).Count > 0)
+                        {
+                            <dt>Boucles</dt>
+                            <dd class="degree">
+                                @foreach (var loop in _graph.LoopsOf(node.Id))
+                                {
+                                    <button class="link-btn" title="Sélectionner la boucle @loop.Id"
+                                            @onclick="() => _graph.SelectEdge(loop.Id)">@loop.Id</button>
+                                }
+                                @if (_graph.AllowSelfLoops)
+                                {
+                                    <button class="link-btn" title="Ajouter une boucle sur ce nœud"
+                                            @onclick="() => ContextAddLoop(node)">+</button>
+                                }
+                            </dd>
+                        }
                     </dl>
                 }
                 else if (_graph.SelectedEdge is { } selectedEdge)
@@ -706,6 +736,22 @@ private void SelectAll()
         Log($"Grille : {(_showGrid ? "visible" : "masquée")}");
     }
 
+    /// <summary>
+    /// Bascule entre multigraphe strict et pseudographe. L'option est aussi
+    /// transmise au canvas, pour que Ctrl+glisser sur un nœud accepte de
+    /// créer une boucle.
+    /// </summary>
+    private async Task OnSelfLoopsChanged(ChangeEventArgs e)
+    {
+        _graph.AllowSelfLoops = e.Value is true;
+        _options.AllowSelfLoops = _graph.AllowSelfLoops;
+        await _canvas.ReloadAsync();
+
+        Log(_graph.AllowSelfLoops
+            ? "Pseudographe : les boucles sont autorisées"
+            : "Multigraphe strict : les boucles sont interdites");
+    }
+
     // ------------------------------------------------------ évènements canvas -> C#
 
     private void OnNodeMoved(string nodeId)
@@ -727,7 +773,7 @@ private void SelectAll()
     /// Ctrl+glisser entre deux nœuds. Le multigraphe est autorisé : si une liaison
     /// existe déjà dans ce sens, on en ajoute une seconde plutôt que de refuser.
     /// </summary>
-    private void OnLinkRequested((string SourceId, string TargetId) link)
+    private void OnLinkRequested((string SourceId, string TargetId, bool IsLoop) link)
     {
         Track();
 
@@ -738,10 +784,25 @@ private void SelectAll()
             return;
         }
 
+        if (link.IsLoop && !_graph.AllowSelfLoops)
+        {
+            Log("Boucle refusée : activez « Boucles » pour autoriser le pseudographe");
+            return;
+        }
+
         var existing = _graph.Edges
             .Count(e => e.SourceId == link.SourceId && e.TargetId == link.TargetId);
 
         var edge = _graph.AddEdge(link.SourceId, link.TargetId);
+
+        if (link.IsLoop)
+        {
+            _graph.SelectEdge(edge.Id);
+            Log(existing > 0
+                ? $"Boucle n°{existing + 1} sur {source.Label} (degré {(_graph.Degree(source.Id))})"
+                : $"Boucle créée sur {source.Label} (degré {(_graph.Degree(source.Id))})");
+            return;
+        }
 
         Log(existing > 0
             ? $"Liaison parallèle n°{existing + 1} : {source.Label} → {target.Label}"
@@ -837,6 +898,24 @@ private void SelectAll()
     {
         Track();
         _graph.RemoveNode(node.Id);
+        CloseContextMenu();
+    }
+
+    /// <summary>Crée une boucle sur un nœud (pseudographe).</summary>
+    private void ContextAddLoop(GraphNode node)
+    {
+        if (!_graph.AllowSelfLoops)
+        {
+            return;
+        }
+
+        Track();
+        var count = _graph.LoopsOf(node.Id).Count;
+        var loop = _graph.AddEdge(node.Id, node.Id);
+        loop.Color = EdgePalette[(count + EdgePalette.Length - 1) % EdgePalette.Length];
+        _graph.SelectEdge(loop.Id);
+
+        Log($"Boucle n°{count + 1} sur {node.Label} — degré {_graph.Degree(node.Id)}");
         CloseContextMenu();
     }
 

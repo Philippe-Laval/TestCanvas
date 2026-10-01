@@ -140,9 +140,12 @@ public sealed class GraphDocument
             throw new InvalidOperationException($"Une arête avec l'identifiant « {edge.Id} » existe déjà.");
         }
 
-        if (string.Equals(edge.SourceId, edge.TargetId, StringComparison.Ordinal))
+        if (string.Equals(edge.SourceId, edge.TargetId, StringComparison.Ordinal) && !AllowSelfLoops)
         {
-            throw new InvalidOperationException("Une arête ne peut pas relier un nœud à lui-même.");
+            // Un multigraphe au sens strict exclut les boucles ; un pseudographe
+            // les autorise (cf. wikipedia/Multigraph).
+            throw new InvalidOperationException(
+                "Une arête ne peut pas relier un nœud à lui-même (activez « AllowSelfLoops »).");
         }
 
         _edges.Add(edge);
@@ -306,6 +309,32 @@ public sealed class GraphDocument
     public GraphNode? PrimarySelectedNode => SelectedNodes.Count > 0 ? SelectedNodes[0] : null;
 
     public GraphEdge? SelectedEdge => FindEdge(_selectedEdgeId);
+
+    /// <summary>
+    /// Autorise les boucles (arêtes d'un nœud à lui-même). False = multigraphe
+    /// au sens strict, True = pseudographe.
+    /// </summary>
+    public bool AllowSelfLoops { get; set; }
+
+    /// <summary>
+    /// Degré sortant : nombre d'arêtes dont ce nœud est la source. Chaque arête
+    /// parallèle compte séparément, et une boucle y compte une fois.
+    /// </summary>
+    public int OutDegree(string nodeId) => _edges.Count(e => e.SourceId == nodeId);
+
+    /// <summary>Degré entrant, avec la même convention.</summary>
+    public int InDegree(string nodeId) => _edges.Count(e => e.TargetId == nodeId);
+
+    /// <summary>
+    /// Degré total selon la convention pseudographe : chaque arête parallèle
+    /// compte séparément et une boucle compte <em>deux</em> fois, puisqu'elle
+    /// est à la fois entrante et sortante.
+    /// </summary>
+    public int Degree(string nodeId) => OutDegree(nodeId) + InDegree(nodeId);
+
+    /// <summary>Boucles d'un nœud.</summary>
+    public IReadOnlyList<GraphEdge> LoopsOf(string nodeId)
+        => [.. _edges.Where(e => e.SourceId == nodeId && e.TargetId == nodeId)];
 
     /// <summary>
     /// Nombre d'arêtes reliant le même couple de nœuds que <paramref name="edge"/>,
@@ -566,7 +595,12 @@ public sealed class GraphDocument
             _incidentEdges[nodeId] = list;
         }
 
-        list.Add(edge);
+        // Pour une boucle, source et cible coïncident : elle ne doit apparaître
+        // qu'une seule fois dans la liste des arêtes incidentes.
+        if (!list.Contains(edge))
+        {
+            list.Add(edge);
+        }
     }
 
     private void RemoveIncident(string nodeId, GraphEdge edge)

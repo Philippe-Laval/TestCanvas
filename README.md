@@ -287,6 +287,46 @@ dès qu'elle redevient unique.
 Chaque liaison est sélectionnable au clic, puis modifiable (type, couleur, largeur,
 style, sens) ou supprimable depuis l'inspecteur ou le menu contextuel.
 
+### Boucles et pseudographe
+
+La terminologie de [wikipedia/Multigraph](https://en.wikipedia.org/wiki/Multigraph)
+distingue le **multigraphe** (arêtes parallèles, sans boucle) du **pseudographe**
+(même chose, plus les boucles). Le choix se fait par option :
+
+```csharp
+graph.AllowSelfLoops = false;   // multigraphe au sens strict (défaut)
+graph.AllowSelfLoops = true;    // pseudographe : A -> A devient possible
+```
+
+Une boucle se crée en relâchant `Ctrl`+glisser sur le nœud de départ lui-même, via
+le menu contextuel (« Ajouter une boucle ») ou le bouton `+` de l'inspecteur.
+
+Côté dessin, une boucle est une goutte refermée sur le nœud : elle part d'un angle
+et y revient par l'angle symétrique, le point de contrôle étant placé à
+l'extérieur. Les extrémités sont ancrées sur la **frontière réelle de la forme**
+(et non sur un cercle), pour qu'une boucle sur un carré ou un losange ne mords pas
+dans le nœud. Plusieurs boucles d'un même nœud sont écartées en éventail autour de
+la direction opposée au barycentre des voisins.
+
+### Degré
+
+Convention pseudographe : chaque arête parallèle compte séparément et **une boucle
+compte deux fois**, puisqu'elle est à la fois entrante et sortante.
+
+```csharp
+graph.OutDegree("n1");   // arêtes dont n1 est la source
+graph.InDegree("n1");    // arêtes dont n1 est la cible
+graph.Degree("n1");      // OutDegree + InDegree → une boucle vaut 2
+graph.LoopsOf("n1");     // boucles du nœud
+```
+
+Avec 4 boucles, `Degree` vaut donc 8. Le degré est affiché dans l'inspecteur du
+nœud (`8 → 4 ← 4`).
+
+Les boucles sont exclues des ressorts des algorithmes de disposition : leur
+« ressort » relierait un nœud à lui-même, donc de distance nulle, et produirait
+une force infinie.
+
 ## Sélection
 
 ```csharp
@@ -326,6 +366,9 @@ var tous  = graph.SelectedNodes;
 - sélection ciblée des 5 arêtes du graphe de démonstration, une par une
 - bascule orientée / non orientée, type et couleur persistés dans le modèle
 - suppression d'une liaison depuis l'inspecteur (5 → 4 arêtes)
+- pseudographe : boucle refusée en mode strict, acceptée une fois l'option active
+- 4 boucles sur un même nœud : 4 milieux de courbe distincts, degré = 8 (→ 4 ← 4)
+- boucles ancrées sur la frontière réelle de la forme (carré, losange, hexagone)
 - sélection multiple : clic puis `Maj`+clic successifs (1 → 2 → 3), retrait par
   `Maj`+clic, rectangle de sélection, « Sélectionner tout »
 - cohérence du nœud primaire entre l'anneau plein du canvas et l'inspecteur

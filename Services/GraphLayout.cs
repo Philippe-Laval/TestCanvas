@@ -802,7 +802,12 @@ public static class GraphLayout
         }
 
         var ids = nodes.Select(n => n.Id).ToHashSet(StringComparer.Ordinal);
-        var edges = graph.Edges.Where(e => ids.Contains(e.SourceId) && ids.Contains(e.TargetId)).ToList();
+
+        // Les boucles sont exclues : leur « ressort » relierait un nœud à
+        // lui-même, donc de distance nulle, et produirait une force infinie.
+        var edges = graph.Edges
+            .Where(e => ids.Contains(e.SourceId) && ids.Contains(e.TargetId) && e.SourceId != e.TargetId)
+            .ToList();
 
         return new LayoutContext(graph, nodes, edges);
     }
