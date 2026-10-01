@@ -39,6 +39,11 @@ public sealed class GraphCanvasBridge
     [JSInvokable]
     public Task NotifyKeyDown(string key, bool ctrl, bool shift)
         => Canvas?.NotifyKeyDownAsync(key, ctrl, shift) ?? Task.CompletedTask;
+
+    /// <summary>Un clic a eu lieu hors du menu contextuel : il doit se refermer.</summary>
+    [JSInvokable]
+    public Task NotifyContextMenuDismissed()
+        => Canvas?.NotifyContextMenuDismissedAsync() ?? Task.CompletedTask;
 }
 
 /// <summary>Position et zoom courants du canvas.</summary>

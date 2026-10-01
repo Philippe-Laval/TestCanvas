@@ -125,6 +125,7 @@
                          CanvasDoubleClicked="OnCanvasDoubleClicked"
                          NodeDoubleClicked="OnNodeDoubleClicked"
                          ContextMenu="OnContextMenu"
+                         ContextMenuDismissed="OnContextMenuDismissed"
                          KeyDown="OnKeyDown" />
 
             <div class="hud">
@@ -138,6 +139,7 @@
             @if (_contextMenu is not null)
             {
                 <div class="context-menu"
+                     id="graph-context-menu"
                      @ref="_contextMenuRef"
                      @oncontextmenu:preventDefault="true">
                     @if (_contextMenu.Kind == "node" && _graph.FindNode(_contextMenu.Id) is { } target)
@@ -857,8 +859,18 @@ private void SelectAll()
         }
     }
 
+    private void OnContextMenuDismissed() => CloseContextMenu();
+
     private void OnKeyDown((string Key, bool Ctrl, bool Shift) key)
     {
+        if (key.Key == "Escape")
+        {
+            // Ferme les deux menus flottants sans rien modifier d'autre.
+            CloseContextMenu();
+            CloseLayoutMenu();
+            return;
+        }
+
         if (key.Key is not ("Delete" or "Backspace" or "F2"))
         {
             return;

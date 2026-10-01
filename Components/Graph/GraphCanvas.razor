@@ -55,6 +55,10 @@
     [Parameter]
     public EventCallback<GraphContextMenuEvent> ContextMenu { get; set; }
 
+    /// <summary>Levé lorsqu'un clic a lieu hors du menu contextuel ouvert.</summary>
+    [Parameter]
+    public EventCallback ContextMenuDismissed { get; set; }
+
     [Parameter]
     public EventCallback<(string Key, bool Ctrl, bool Shift)> KeyDown { get; set; }
 
@@ -404,6 +408,9 @@
 
     internal Task NotifyKeyDownAsync(string key, bool ctrl, bool shift)
         => KeyDown.InvokeAsync((key, ctrl, shift));
+
+    internal Task NotifyContextMenuDismissedAsync()
+        => ContextMenuDismissed.InvokeAsync();
 
     public async ValueTask DisposeAsync()
     {

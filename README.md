@@ -177,6 +177,9 @@ glisser, et le document est replacé dans le même état — pas de boucle.
 | `Maj`+glisser | sélection rectangulaire |
 | `Ctrl`+glisser depuis un nœud | créer une arête |
 | Clic droit | menu contextuel (nœud, arête, canvas), repositionné dans le canvas après mesure |
+| Clic gauche ailleurs | referme le menu contextuel, sans annuler l'action du clic |
+| Clic droit ailleurs | referme l'ancien menu et ouvre le nouveau à l'endroit cliqué |
+| `Échap` | referme les menus flottants (contextuel et disposition) |
 | Double-clic | renommer un nœud / en ajouter un |
 | `Suppr` | supprimer la sélection |
 | `F2` | suffixe de libellé |
@@ -367,6 +370,9 @@ var tous  = graph.SelectedNodes;
 - sélection ciblée des 5 arêtes du graphe de démonstration, une par une
 - bascule orientée / non orientée, type et couleur persistés dans le modèle
 - suppression d'une liaison depuis l'inspecteur (5 → 4 arêtes)
+- menu contextuel refermé par : clic sur le canvas, clic sur un bouton de
+  l'interface, `Échap` — et laissé ouvert si le clic est à l'intérieur
+- clic droit ailleurs : l'ancien menu est remplacé par le nouveau (nœud, arête)
 - pseudographe : boucle refusée en mode strict, acceptée une fois l'option active
 - 4 boucles sur un même nœud : 4 milieux de courbe distincts, degré = 8 (→ 4 ← 4)
 - boucles ancrées sur la frontière réelle de la forme (carré, losange, hexagone)

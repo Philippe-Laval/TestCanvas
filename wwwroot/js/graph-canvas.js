@@ -81,6 +81,7 @@ class GraphCanvas {
             nodeBorderWidth: 2,
             parallelEdgeSpread: 0.16,
             allowSelfLoops: false,
+            contextMenuId: 'graph-context-menu',
             popupMargin: 200,
             selectionColor: '#38bdf8',
             fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
@@ -147,6 +148,25 @@ class GraphCanvas {
         this._onFocus = () => { this.hasFocus = true; };
         this._onBlur = () => { this.hasFocus = false; };
 
+        // Fermeture du menu contextuel sur un clic extérieur. Écouteur en phase
+        // de capture sur le document, et non voile : le clic n'est pas intercepté,
+        // il continue donc d'agir normalement sur le canvas.
+        this._onDocumentPointerDown = (event) => {
+            const id = this.options.contextMenuId;
+            if (!id) {
+                return;
+            }
+
+            const popup = document.getElementById(id);
+
+            // absent du DOM = aucun menu ouvert.
+            if (!popup || popup.contains(event.target)) {
+                return;
+            }
+
+            this.emit('NotifyContextMenuDismissed');
+        };
+
         this.attach();
         this.resize();
 
@@ -180,6 +200,7 @@ class GraphCanvas {
         c.addEventListener('blur', this._onBlur);
         window.addEventListener('keydown', this._onKeyDown);
         window.addEventListener('keyup', this._onKeyUp);
+        document.addEventListener('pointerdown', this._onDocumentPointerDown, true);
     }
 
     dispose() {
@@ -201,6 +222,7 @@ class GraphCanvas {
         c.removeEventListener('blur', this._onBlur);
         window.removeEventListener('keydown', this._onKeyDown);
         window.removeEventListener('keyup', this._onKeyUp);
+        document.removeEventListener('pointerdown', this._onDocumentPointerDown, true);
         window.removeEventListener('resize', this._onResize);
 
         if (this._observer) {
