@@ -1,0 +1,801 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using TestCanvas.Models
+@using TestCanvas.Services
+@using TestCanvas.Components.Graph
+@implements IDisposable
+
+<PageTitle>Canvas de graphe</PageTitle>
+
+<div class="page">
+    <header class="page-header">
+        <h1>Graphe interactif</h1>
+        <p class="subtitle">
+            Canvas JavaScript piloté par un <code>GraphDocument</code> C#. Déplacez les nœuds à la
+            souris&nbsp;: les modifications remontent dans le modèle Blazor, qui reste la source de vérité.
+        </p>
+    </header>
+
+    <div class="toolbar">
+        <button class="btn primary" @onclick="AddNode">Ajouter un nœud</button>
+        <button class="btn" @onclick="AddNodeAtCenter">Ajouter au centre</button>
+        <button class="btn" @onclick="AddLinkedPair">Ajouter une paire liée</button>
+        <button class="btn" @onclick="RandomizeLayout">Disposition aléatoire</button>
+        <button class="btn" @onclick="RunForceLayout" disabled="@(_graph.NodeCount == 0)">Mise en page forcée</button>
+        <button class="btn" @onclick="RunHierarchicalLayout" disabled="@(_graph.NodeCount == 0)">Disposition hiérarchique</button>
+        <span class="separator"></span>
+        <button class="btn" @onclick="HighlightShortestPath" disabled="@(_graph.NodeCount < 2)" title="Calcul du plus court chemin en C#, nœuds et arêtes mis en avant">
+            Chemin le plus court
+        </button>
+        <button class="btn" @onclick="ClearHighlight" disabled="@(_graph.HighlightedNodeIds.Count == 0)">Effacer la surbrillance</button>
+        <span class="separator"></span>
+        <button class="btn" @onclick="DeleteSelection" disabled="@(_graph.SelectedNodes.Count == 0 && _graph.SelectedEdge is null)">Supprimer la sélection</button>
+        <button class="btn" @onclick="SelectAll" disabled="@(_graph.NodeCount == 0)">Sélectionner tout</button>
+        <button class="btn danger" @onclick="ClearGraph" disabled="@(_graph.NodeCount == 0)">Vider</button>
+        <button class="btn" @onclick="Undo" disabled="@(!_history.CanUndo)" title="Annuler (instantané C#)">↶</button>
+        <button class="btn" @onclick="Redo" disabled="@(!_history.CanRedo)" title="Rétablir">↷</button>
+        <span class="separator"></span>
+        <label class="toggle">
+            <input type="checkbox" checked="@_snapToGrid" @onchange="OnSnapChanged" />
+            Magnétisme grille
+        </label>
+        <label class="toggle">
+            <input type="checkbox" checked="@_showGrid" @onchange="OnGridChanged" />
+            Grille
+        </label>
+        <span class="separator"></span>
+        <button class="btn" @onclick="ZoomIn" title="Zoom avant">+</button>
+        <button class="btn" @onclick="ZoomOut" title="Zoom arrière">&minus;</button>
+        <button class="btn" @onclick="FitView" title="Recadrer sur le graphe">Recadrer</button>
+        <span class="zoom-readout">@_zoomText</span>
+    </div>
+
+    <div class="workspace">
+        <div class="canvas-pane">
+            <GraphCanvas @ref="_canvas"
+                         Document="_graph"
+                         Class="canvas-host"
+                         Options="_options"
+                         NodeMoved="OnNodeMoved"
+                         SelectionChanged="OnSelectionChanged"
+                         LinkRequested="OnLinkRequested"
+                         CanvasDoubleClicked="OnCanvasDoubleClicked"
+                         NodeDoubleClicked="OnNodeDoubleClicked"
+                         ContextMenu="OnContextMenu"
+                         KeyDown="OnKeyDown" />
+
+            <div class="hud">
+                <div><strong>@_graph.NodeCount</strong> nœuds &middot; <strong>@_graph.EdgeCount</strong> arêtes</div>
+                <div class="hint">
+                    Glisser&nbsp;: déplacer &middot; Molette&nbsp;: zoom &middot; Clic droit&nbsp;: menu &middot;
+                    Ctrl+glisser depuis un nœud&nbsp;: créer un lien &middot; Maj+glisser&nbsp;: sélection rectangulaire
+                </div>
+            </div>
+
+            @if (_contextMenu is not null)
+            {
+                <div class="context-menu"
+                     style="left:@(_contextMenu.OffsetX)px; top:@(_contextMenu.OffsetY)px"
+                     @oncontextmenu:preventDefault="true">
+                    @if (_contextMenu.Kind == "node" && _graph.FindNode(_contextMenu.Id) is { } target)
+                    {
+                        <div class="context-title">Nœud&nbsp;: @target.Label</div>
+                        <button @onclick="() => ContextRenameNode(target)">Renommer…</button>
+                        <button @onclick="() => ContextRandomizeColor(target)">Couleur aléatoire</button>
+                        <button @onclick="() => ContextToggleLock(target)">@(target.Locked ? "Déverrouiller" : "Verrouiller")</button>
+                        <button @onclick="() => ContextToggleShape(target)">Changer de forme</button>
+                        <hr />
+                        <button class="danger" @onclick="() => ContextDeleteNode(target)">Supprimer</button>
+                    }
+                    else if (_contextMenu.Kind == "edge" && _graph.FindEdge(_contextMenu.Id) is { } edge)
+                    {
+                        <div class="context-title">Arête&nbsp;: @edge.SourceId → @edge.TargetId</div>
+                        <button @onclick="() => ContextReverseEdge(edge)">Inverser le sens</button>
+                        <button @onclick="() => ContextToggleEdgeStyle(edge)">Style&nbsp;: @edge.Style</button>
+                        <hr />
+                        <button class="danger" @onclick="() => ContextDeleteEdge(edge)">Supprimer</button>
+                    }
+                    else
+                    {
+                        <div class="context-title">Canvas (@((int)_contextMenu.X), @((int)_contextMenu.Y))</div>
+                        <button @onclick="() => ContextAddNodeAt(_contextMenu.X, _contextMenu.Y)">Ajouter un nœud ici</button>
+                        <button @onclick="ContextFitView">Recadrer la vue</button>
+                    }
+                </div>
+            }
+        </div>
+
+        <aside class="side-panel">
+            <section>
+                <h2>Sélection</h2>
+                @if (_selectedNode is { } node)
+                {
+                    <dl class="inspector">
+                        <dt>Identifiant</dt>
+                        <dd><code>@node.Id</code></dd>
+                        <dt>Libellé</dt>
+                        <dd><input class="input" value="@node.Label" @onchange="e => UpdateLabel(node, e.Value?.ToString() ?? string.Empty)" /></dd>
+                        <dt>Forme</dt>
+                        <dd>
+                            <select class="input" value="@node.Shape" @onchange="e => UpdateShape(node, e.Value?.ToString())">
+                                @foreach (var shape in Enum.GetValues<NodeShape>())
+                                {
+                                    <option value="@shape">@shape</option>
+                                }
+                            </select>
+                        </dd>
+                        <dt>Couleur</dt>
+                        <dd><input type="color" class="input color" value="@node.Fill" @onchange="e => UpdateColor(node, e.Value?.ToString())" /></dd>
+                        <dt>Position</dt>
+                        <dd>
+                            <input class="input tiny" type="number" step="1" value="@node.X"
+                                   @onchange="e => UpdatePosition(node, e.Value?.ToString(), node.Y.ToString())" />
+                            <input class="input tiny" type="number" step="1" value="@node.Y"
+                                   @onchange="e => UpdatePosition(node, node.X.ToString(), e.Value?.ToString())" />
+                        </dd>
+                        <dt>Rayon</dt>
+                        <dd><input class="input" type="range" min="12" max="70" value="@node.Radius" @oninput="e => UpdateRadius(node, e.Value?.ToString())" /></dd>
+                        <dt>Verrouillé</dt>
+                        <dd><input type="checkbox" checked="@node.Locked" @onchange="e => ToggleLock(node, e.Value)" /></dd>
+                    </dl>
+                }
+                else if (_graph.SelectedEdge is { } selectedEdge)
+                {
+                    <dl class="inspector">
+                        <dt>Identifiant</dt>
+                        <dd><code>@selectedEdge.Id</code></dd>
+                        <dt>Libellé</dt>
+                        <dd><input class="input" value="@selectedEdge.Label" @onchange="e => UpdateEdgeLabel(selectedEdge, e.Value?.ToString() ?? string.Empty)" /></dd>
+                        <dt>Style</dt>
+                        <dd>
+                            <select class="input" value="@selectedEdge.Style" @onchange="e => UpdateEdgeStyle(selectedEdge, e.Value?.ToString())">
+                                @foreach (var style in Enum.GetValues<EdgeStyle>())
+                                {
+                                    <option value="@style">@style</option>
+                                }
+                            </select>
+                        </dd>
+                        <dt>Pointillés</dt>
+                        <dd><input type="checkbox" checked="@selectedEdge.Dashed" @onchange="e => ToggleEdgeDashed(selectedEdge, e.Value)" /></dd>
+                    </dl>
+                }
+                else
+                {
+                    <p class="empty">Aucun élément sélectionné.</p>
+                }
+            </section>
+
+            <section>
+                <h2>Arêtes du nœud</h2>
+                @if (_selectedNode is not null && _graph.EdgesOf(_selectedNode.Id).Count > 0)
+                {
+                    <ul class="edge-list">
+                        @foreach (var edge in _graph.EdgesOf(_selectedNode.Id))
+                        {
+                            var other = edge.SourceId == _selectedNode.Id ? edge.TargetId : edge.SourceId;
+                            <li>
+                                <span>@(_graph.FindNode(other)?.Label ?? other)</span>
+                                <button class="link-btn danger" @onclick="() => _graph.RemoveEdge(edge.Id)">×</button>
+                            </li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <p class="empty">Aucune arête.</p>
+                }
+            </section>
+
+            <section>
+                <h2>Journal</h2>
+                <ol class="log">
+                    @foreach (var entry in _log)
+                    {
+                        <li>@entry</li>
+                    }
+                </ol>
+            </section>
+
+            <section>
+                <h2>Sérialisation</h2>
+                <div class="row">
+                    <button class="btn" @onclick="ExportJson">Sérialiser</button>
+                    <button class="btn" @onclick="ImportJson">Désérialiser</button>
+                    <button class="btn" @onclick="DownloadPng">PNG</button>
+                </div>
+                <textarea class="json" readonly placeholder="Le JSON du graphe s'affichera ici.">@_json</textarea>
+            </section>
+        </aside>
+    </div>
+</div>
+
+@code {
+    private readonly GraphDocument _graph = new();
+    private readonly GraphHistory _history = new();
+    private readonly List<string> _log = [];
+
+    private GraphCanvas _canvas = default!;
+    private GraphCanvasOptions _options = new();
+    private GraphNode? _selectedNode;
+    private GraphContextMenuEvent? _contextMenu;
+    private string _json = string.Empty;
+    private bool _snapToGrid;
+    private bool _showGrid = true;
+    private int _renameCounter;
+    private string _zoomText = "zoom 100%";
+
+    private static readonly string[] Palette =
+        ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"];
+
+    protected override void OnInitialized()
+    {
+        _history.Attach(_graph);
+        SeedDemoGraph();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // Le canvas se construit après le premier rendu de la page : on attend
+        // son signal « prêt » pour recadrer la vue.
+        if (_canvas is null)
+        {
+            return;
+        }
+
+        _canvas.Ready += OnCanvasReady;
+
+        if (_canvas.IsReady)
+        {
+            await OnCanvasReadyAsync();
+        }
+    }
+
+    private async Task OnCanvasReadyAsync()
+    {
+        try
+        {
+            await FitViewAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Le circuit a été coupé pendant le premier rendu.
+        }
+    }
+
+    // Abonnement « fire and forget » : le retour est géré par OnCanvasReadyAsync.
+    private void OnCanvasReady() => _ = OnCanvasReadyAsync();
+
+    public void Dispose()
+    {
+        // Les abonnements sont gérés par le composant GraphCanvas.
+    }
+
+    private void SeedDemoGraph()
+    {
+        _graph.BeginBatch();
+        try
+        {
+            var pipeline = new[] { "Collecte", "Nettoyage", "Analyse", "Rapport" };
+            var ids = new List<string>();
+
+            for (var i = 0; i < pipeline.Length; i++)
+            {
+                var node = new GraphNode(
+                    id: $"n{i + 1}",
+                    label: pipeline[i],
+                    x: i * 200 - 300,
+                    y: 0,
+                    shape: NodeShape.RoundedRectangle,
+                    fill: Palette[i % Palette.Length]);
+
+                _graph.AddNode(node);
+                ids.Add(node.Id);
+            }
+
+            for (var i = 0; i < ids.Count - 1; i++)
+            {
+                _graph.AddEdge($"e{i + 1}", ids[i], ids[i + 1], "étape");
+            }
+
+            var review = new GraphNode("rev", "Revue", 0, 180, NodeShape.Diamond, "#a855f7");
+            _graph.AddNode(review);
+            _graph.AddEdge("e5", ids[2], "rev", "contrôle");
+
+            var alert = new GraphNode("alert", "Alerte", 250, 190, NodeShape.Hexagon, "#f97316");
+            _graph.AddNode(alert);
+            _graph.AddEdge("e6", "rev", "alert", "si anomalie");
+        }
+        finally
+        {
+            _graph.EndBatch();
+        }
+    }
+
+    // ------------------------------------------------------------- outillage C#
+
+    private void Track()
+    {
+        _history.Track();
+        _log.Clear();
+    }
+
+    private void AddNode()
+    {
+        Track();
+        var index = _graph.NodeCount;
+        _graph.AddNode(new GraphNode(
+            $"n{index + 1}-{DateTime.Now.Ticks % 1000}",
+            "Nouveau",
+            Random.Shared.Next(-400, 400),
+            Random.Shared.Next(-250, 250))
+        {
+            Shape = (NodeShape)(index % Enum.GetValues<NodeShape>().Length),
+            Fill = Palette[index % Palette.Length],
+            Stroke = GraphNode.Darken(Palette[index % Palette.Length])
+        });
+
+        Log($"Ajout d'un nœud (total : {_graph.NodeCount})");
+    }
+
+    /// <summary>Ajoute un nœud au centre de la vue courante (repli si la vue est inconnue).</summary>
+private async Task AddNodeAtCenter()
+    {
+        var center = await CenterOfViewAsync();
+        AddNodeAt(center.X, center.Y);
+    }
+
+    private async Task<(double X, double Y)> CenterOfViewAsync()
+    {
+        if (_canvas is null)
+        {
+            return (0, 0);
+        }
+
+        var center = await _canvas.GetCenterAsync();
+        return (Math.Round(center.X), Math.Round(center.Y));
+    }
+
+    private void AddNodeAt(double x, double y)
+    {
+        Track();
+        var index = _graph.NodeCount;
+        var node = new GraphNode(
+            $"n{index + 1}-{Random.Shared.Next(100, 999)}",
+            $"Nœud {index + 1}",
+            Math.Round(x),
+            Math.Round(y))
+        {
+            Shape = (NodeShape)(index % Enum.GetValues<NodeShape>().Length),
+            Fill = Palette[index % Palette.Length],
+            Stroke = GraphNode.Darken(Palette[index % Palette.Length])
+        };
+
+        _graph.AddNode(node);
+        _graph.SelectNode(node.Id);
+        Log($"Ajout du nœud {node.Label} en ({node.X:0}, {node.Y:0})");
+    }
+
+    private void AddLinkedPair()
+    {
+        Track();
+        var x = Random.Shared.Next(-350, 350);
+        var a = _graph.AddNode($"A{_graph.NodeCount}", x, 0);
+        var b = _graph.AddNode($"B{_graph.NodeCount}", x + 140, 0);
+        _graph.AddEdge(a.Id, b.Id, "lien");
+        Log("Ajout d'une paire liée");
+    }
+
+    private async Task RandomizeLayout()
+    {
+        Track();
+        _graph.BeginBatch();
+        try
+        {
+            foreach (var node in _graph.Nodes.Where(n => !n.Locked))
+            {
+                node.MoveTo(Random.Shared.Next(-450, 450), Random.Shared.Next(-280, 280));
+            }
+        }
+        finally
+        {
+            _graph.EndBatch();
+        }
+
+        await FitViewAsync();
+        Log("Positions aléatoires");
+    }
+
+    private async Task RunForceLayout()
+    {
+        Track();
+        GraphLayout.ForceDirected(_graph);
+        await FitViewAsync();
+        Log("Mise en page forcée");
+    }
+
+    private async Task RunHierarchicalLayout()
+    {
+        Track();
+        GraphLayout.Hierarchical(_graph);
+        await FitViewAsync();
+        Log("Disposition hiérarchique");
+    }
+
+    /// <summary>Calcule le plus court chemin entre le nœud sélectionné et le premier
+    /// nœud du document, puis met en avant le résultat (purement côté C#).</summary>
+    private void HighlightShortestPath()
+    {
+        var from = _selectedNode ?? _graph.Nodes.FirstOrDefault();
+        var to = _graph.Nodes.FirstOrDefault(n => n.Id != from?.Id);
+
+        if (from is null || to is null)
+        {
+            return;
+        }
+
+        var path = GraphAlgorithms.ShortestPath(_graph, from.Id, to.Id);
+        if (path is null || path.Count < 2)
+        {
+            Log($"Aucun chemin entre {from.Label} et {to.Label}");
+            return;
+        }
+
+        var nodeIds = path.Select(n => n.Id).ToList();
+        var edgeIds = new List<string>();
+
+        for (var i = 0; i < path.Count - 1; i++)
+        {
+            edgeIds.AddRange(
+                _graph.Edges
+                    .Where(e =>
+                        (e.SourceId == path[i].Id && e.TargetId == path[i + 1].Id)
+                        || (e.SourceId == path[i + 1].Id && e.TargetId == path[i].Id))
+                    .Select(e => e.Id));
+        }
+
+        _graph.SetHighlight(nodeIds, edgeIds);
+        Log($"Chemin : {string.Join(" → ", path.Select(n => n.Label))} ({edgeIds.Count} arêtes)");
+    }
+
+    private void ClearHighlight() => _graph.ClearHighlight();
+
+private async Task Undo()
+    {
+        if (_history.Undo())
+        {
+            _selectedNode = null;
+            Log("Annulation");
+            await FitViewAsync();
+        }
+    }
+
+    private async Task Redo()
+    {
+        if (_history.Redo())
+        {
+            _selectedNode = null;
+            Log("Rétablissement");
+            await FitViewAsync();
+        }
+    }
+
+    private void DeleteSelection()
+    {
+        Track();
+
+        foreach (var node in _graph.SelectedNodes.ToList())
+        {
+            _graph.RemoveNode(node.Id);
+        }
+
+        if (_graph.SelectedEdge is { } edge)
+        {
+            _graph.RemoveEdge(edge.Id);
+        }
+
+        Log("Suppression de la sélection");
+    }
+
+    private void ClearGraph()
+    {
+        Track();
+        _graph.Clear();
+        _selectedNode = null;
+        Log("Document vidé");
+    }
+
+    /// <summary>Un seul appel : la boucle précédente notifiait une fois par nœud.</summary>
+private void SelectAll()
+    {
+        _graph.SetSelection([.. _graph.Nodes.Select(n => n.Id)], null);
+        Log($"Sélection : {_graph.SelectedNodes.Count} nœuds");
+    }
+
+    private async Task ZoomIn() => await RefreshView(() => _canvas.ZoomByAsync(1.2));
+
+    private async Task ZoomOut() => await RefreshView(() => _canvas.ZoomByAsync(1 / 1.2));
+
+    private async Task FitView() => await FitViewAsync();
+
+    private async Task FitViewAsync()
+    {
+        if (_canvas is null || !_canvas.IsReady)
+        {
+            return;
+        }
+
+        _zoomText = (await _canvas.FitToViewAsync()).ToString();
+    }
+
+    private async Task RefreshView(Func<Task<GraphCanvasView>> action)
+    {
+        if (_canvas is null || !_canvas.IsReady)
+        {
+            return;
+        }
+
+        _zoomText = (await action()).ToString();
+    }
+
+    private void OnSnapChanged(ChangeEventArgs e)
+    {
+        _snapToGrid = e.Value is true;
+        _options.SnapToGrid = _snapToGrid;
+        _ = _canvas.ReloadAsync();
+        Log($"Magnétisme grille : {(_snapToGrid ? "activé" : "désactivé")}");
+    }
+
+    private void OnGridChanged(ChangeEventArgs e)
+    {
+        _showGrid = e.Value is true;
+        _options.ShowGrid = _showGrid;
+        _ = _canvas.ReloadAsync();
+        Log($"Grille : {(_showGrid ? "visible" : "masquée")}");
+    }
+
+    // ------------------------------------------------------ évènements canvas -> C#
+
+    private void OnNodeMoved(string nodeId)
+        => Log($"Nœud déplacé : {_graph.FindNode(nodeId)?.Label}");
+
+    private void OnSelectionChanged(IReadOnlyList<string> nodeIds)
+    {
+        // Le document expose les nœuds dans l'ordre de sélection : le premier est
+        // le nœud actif, celui que le canvas affiche avec un anneau plein.
+        _selectedNode = _graph.PrimarySelectedNode;
+        Log(_selectedNode is null
+            ? "Sélection effacée"
+            : _graph.SelectedNodes.Count > 1
+                ? $"Sélection : {_selectedNode.Label} + {_graph.SelectedNodes.Count - 1} autre(s)"
+                : $"Sélection : {_selectedNode.Label}");
+    }
+
+    private void OnLinkRequested((string SourceId, string TargetId) link)
+    {
+        Track();
+        _graph.AddEdge(link.SourceId, link.TargetId);
+        Log($"Arête {_graph.FindNode(link.SourceId)?.Label} → {_graph.FindNode(link.TargetId)?.Label}");
+    }
+
+    private void OnCanvasDoubleClicked((double X, double Y) position)
+    {
+        Track();
+        var node = _graph.AddNode($"N{++_renameCounter}", position.X, position.Y);
+        _graph.SelectNode(node.Id);
+        Log($"Nœud ajouté en ({position.X:0}, {position.Y:0})");
+    }
+
+    private void OnNodeDoubleClicked(string nodeId)
+    {
+        var node = _graph.FindNode(nodeId);
+        if (node is null)
+        {
+            return;
+        }
+
+        node.Label = $"{node.Label} ★";
+        Log($"Renommage en ligne : {node.Label}");
+    }
+
+    private void OnContextMenu(GraphContextMenuEvent e)
+    {
+        _contextMenu = e;
+
+        if (e.Kind == "node")
+        {
+            _graph.SelectNode(e.Id);
+        }
+    }
+
+    private void OnKeyDown((string Key, bool Ctrl, bool Shift) key)
+    {
+        if (key.Key is not ("Delete" or "Backspace" or "F2"))
+        {
+            return;
+        }
+
+        if (key.Key == "F2" && _selectedNode is { } rename)
+        {
+            rename.Label = $"{rename.Label} (v2)";
+            Log("Raccourci F2 appliqué");
+            return;
+        }
+
+        DeleteSelection();
+    }
+
+    // ------------------------------------------------------------ menu contextuel
+
+    private void ContextAddNodeAt(double x, double y)
+    {
+        Track();
+        var node = _graph.AddNode($"N{++_renameCounter}", x, y);
+        _graph.SelectNode(node.Id);
+        CloseContextMenu();
+    }
+
+    private void ContextRenameNode(GraphNode node)
+    {
+        node.Label = $"{node.Label} ✎";
+        CloseContextMenu();
+    }
+
+    private void ContextRandomizeColor(GraphNode node)
+    {
+        Track();
+        var color = Palette[Random.Shared.Next(Palette.Length)];
+        node.Fill = color;
+        node.Stroke = GraphNode.Darken(color);
+        CloseContextMenu();
+    }
+
+    private void ContextToggleLock(GraphNode node)
+    {
+        node.Locked = !node.Locked;
+        Log($"Nœud {(node.Locked ? "verrouillé" : "déverrouillé")} : {node.Label}");
+        CloseContextMenu();
+    }
+
+    private void ContextToggleShape(GraphNode node)
+    {
+        node.Shape = (NodeShape)(((int)node.Shape + 1) % Enum.GetValues<NodeShape>().Length);
+        CloseContextMenu();
+    }
+
+    private void ContextDeleteNode(GraphNode node)
+    {
+        Track();
+        _graph.RemoveNode(node.Id);
+        CloseContextMenu();
+    }
+
+    private void ContextReverseEdge(GraphEdge edge)
+    {
+        Track();
+        (edge.SourceId, edge.TargetId) = (edge.TargetId, edge.SourceId);
+        CloseContextMenu();
+    }
+
+    private void ContextToggleEdgeStyle(GraphEdge edge)
+    {
+        edge.Style = (EdgeStyle)(((int)edge.Style + 1) % Enum.GetValues<EdgeStyle>().Length);
+        CloseContextMenu();
+    }
+
+    private void ContextDeleteEdge(GraphEdge edge)
+    {
+        Track();
+        _graph.RemoveEdge(edge.Id);
+        CloseContextMenu();
+    }
+
+    private async Task ContextFitView()
+    {
+        await FitViewAsync();
+        CloseContextMenu();
+    }
+
+    private void CloseContextMenu() => _contextMenu = null;
+
+    // -------------------------------------------------------------- inspecteur
+
+    private void UpdateLabel(GraphNode node, string value) => node.Label = value;
+
+    private void UpdateShape(GraphNode node, string? shape)
+    {
+        if (Enum.TryParse<NodeShape>(shape, out var parsed))
+        {
+            node.Shape = parsed;
+        }
+    }
+
+    private void UpdateColor(GraphNode node, string? color)
+    {
+        if (!string.IsNullOrWhiteSpace(color))
+        {
+            node.Fill = color;
+            node.Stroke = GraphNode.Darken(color);
+        }
+    }
+
+    private void UpdatePosition(GraphNode node, string? x, string? y)
+        => node.MoveTo(Parse(x, node.X), Parse(y, node.Y));
+
+    private void UpdateRadius(GraphNode node, string? value) => node.Radius = Parse(value, node.Radius);
+
+    private void ToggleLock(GraphNode node, object? value) => node.Locked = value is true;
+
+    private void UpdateEdgeLabel(GraphEdge edge, string value) => edge.Label = value;
+
+    private void UpdateEdgeStyle(GraphEdge edge, string? style)
+    {
+        if (Enum.TryParse<EdgeStyle>(style, out var parsed))
+        {
+            edge.Style = parsed;
+        }
+    }
+
+    private void ToggleEdgeDashed(GraphEdge edge, object? value) => edge.Dashed = value is true;
+
+    private static double Parse(string? text, double fallback)
+        => double.TryParse(text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.CurrentCulture, out var value)
+            ? value
+            : fallback;
+
+    // ---------------------------------------------------------- sérialisation
+
+    private void ExportJson() => _json = GraphSerializer.Serialize(_graph);
+
+    private async Task ImportJson()
+    {
+        if (string.IsNullOrWhiteSpace(_json))
+        {
+            Log("Aucun JSON à importer");
+            return;
+        }
+
+        try
+        {
+            var imported = GraphSerializer.Deserialize(_json);
+            _history.Track();
+            _graph.Reset(imported.Nodes, imported.Edges);
+            _selectedNode = null;
+            Log($"Import réussi : {_graph.NodeCount} nœuds, {_graph.EdgeCount} arêtes");
+            await FitViewAsync();
+        }
+        catch (FormatException ex)
+        {
+            Log($"Échec de l'import : {ex.Message}");
+        }
+    }
+
+    private async Task DownloadPng()
+    {
+        var name = $"graphe-{DateTime.Now:yyyyMMdd-HHmm}.png";
+
+        if (await _canvas.DownloadPngAsync(name))
+        {
+            Log($"Export PNG téléchargé ({name})");
+        }
+        else
+        {
+            Log("Export PNG indisponible");
+        }
+    }
+
+    private void Log(string message)
+    {
+        _log.Insert(0, $"{DateTime.Now:HH:mm:ss} — {message}");
+        if (_log.Count > 12)
+        {
+            _log.RemoveAt(_log.Count - 1);
+        }
+    }
+}
