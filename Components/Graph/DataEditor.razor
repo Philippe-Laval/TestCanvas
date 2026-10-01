@@ -1,0 +1,352 @@
+@using TestCanvas.Models
+@using TestCanvas.Services
+
+@if (Target is null)
+{
+    <p class="empty">Sélectionnez un nœud ou une arête pour éditer ses données.</p>
+}
+else
+{
+    <div class="data-editor">
+        <div class="data-head">
+            <span class="data-target">@Caption</span>
+            <span class="data-count">@Target.DataCount @(Target.DataCount > 1 ? "entrées" : "entrée")</span>
+            <button class="link-btn danger" @onclick="ClearAllAsync" disabled="@(Target.DataCount == 0)"
+                    title="Supprimer toutes les entrées">Tout effacer</button>
+        </div>
+
+        @if (Target.DataCount > 0)
+        {
+            <div class="data-rows">
+                @foreach (var entry in Target.DataEntries)
+                {
+                    var key = entry.Key;
+                    var kind = DataValue.Detect(entry.Value);
+
+                    <div class="data-row" @key="key">
+                        <input class="input data-key" value="@key"
+                               @onchange="e => RenameKeyAsync(key, e.Value?.ToString())"
+                               title="Clé de l'entrée" />
+
+                        @if (kind == DataValueKind.Boolean)
+                        {
+                            <label class="data-bool" title="Valeur booléenne">
+                                <input type="checkbox" checked="@(entry.Value is true)"
+                                       @onchange="e => SetBoolAsync(key, e.Value is true)" />
+                                <span>@DataValue.Format(entry.Value, kind)</span>
+                            </label>
+                        }
+                        else if (kind == DataValueKind.Null)
+                        {
+                            <span class="data-null" title="Valeur nulle">null</span>
+                        }
+                        else
+                        {
+                            <input class="input data-value @ValueClass(kind)"
+                                   inputmode="@(kind == DataValueKind.Number ? "decimal" : null)"
+                                   value="@DataValue.Format(entry.Value, kind)"
+                                   @onchange="e => SetValueAsync(key, kind, e.Value?.ToString())" />
+                        }
+
+                        <select class="input data-kind" value="@kind"
+                                @onchange="e => ChangeKindAsync(key, e.Value?.ToString())"
+                                title="Type de la valeur">
+                            @foreach (var option in DataValue.Kinds)
+                            {
+                                <option value="@option">@DataValue.Label(option)</option>
+                            }
+                        </select>
+
+                        <button class="link-btn danger" @onclick="() => RemoveKeyAsync(key)"
+                                title="Supprimer l'entrée « @key »">×</button>
+
+                        @if (Errors.TryGetValue(key, out var message))
+                        {
+                            <div class="data-error">@message</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="empty">Aucune entrée.</p>
+        }
+
+        <div class="data-add">
+            <input class="input data-key" placeholder="clé" @bind="_newKey" @bind:event="onchange"
+                   title="Clé de la nouvelle entrée" />
+            @if (_newKind == DataValueKind.Boolean)
+            {
+                <label class="data-bool" title="Valeur booléenne">
+                    <input type="checkbox" @bind="_newBool" />
+                    <span>@(_newBool ? "true" : "false")</span>
+                </label>
+            }
+            else
+            {
+                <input class="input data-value @ValueClass(_newKind)"
+                       inputmode="@(_newKind == DataValueKind.Number ? "decimal" : null)"
+                       placeholder="@Placeholder(_newKind)"
+                       @bind="_newText" @bind:event="onchange" />
+            }
+            <select class="input data-kind" @bind="_newKind" title="Type de la valeur">
+                @foreach (var option in DataValue.Kinds)
+                {
+                    <option value="@option">@DataValue.Label(option)</option>
+                }
+            </select>
+            <button class="btn" @onclick="AddEntryAsync" disabled="@string.IsNullOrWhiteSpace(_newKey)">Ajouter</button>
+        </div>
+
+        @if (_newError is not null)
+        {
+            <div class="data-error">@_newError</div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>Objet dont le dictionnaire <c>Data</c> est édité. Null = rien à éditer.</summary>
+    [Parameter]
+    public GraphElement? Target { get; set; }
+
+    /// <summary>Précise à l'utilisateur quel objet est en cours d'édition.</summary>
+    [Parameter]
+    public string? Caption { get; set; }
+
+    /// <summary>Appelé avant chaque modification, pour enregistrer un état annulable.</summary>
+    [Parameter]
+    public EventCallback OnTrack { get; set; }
+
+    /// <summary>Reçoit un message à afficher dans le journal.</summary>
+    [Parameter]
+    public EventCallback<string> OnNotify { get; set; }
+
+    private readonly Dictionary<string, string> Errors = new(StringComparer.Ordinal);
+    private GraphElement? _target;
+    private string _newKey = string.Empty;
+    private string _newText = string.Empty;
+    private bool _newBool;
+    private DataValueKind _newKind = DataValueKind.Text;
+    private string? _newError;
+
+    /// <summary>
+    /// Les erreurs sont indexées par clé de modèle : sans cette remise à zéro au
+    /// changement de cible, un message laissé sur « criticité » réapparaîtrait sur
+    /// l'objet suivant qui possède la même clé.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(_target, Target))
+        {
+            return;
+        }
+
+        _target = Target;
+        Errors.Clear();
+        _newError = null;
+        _newKey = string.Empty;
+        _newText = string.Empty;
+        _newBool = false;
+    }
+
+    private static string ValueClass(DataValueKind kind)
+        => kind == DataValueKind.Json ? "mono" : string.Empty;
+
+    private static string Placeholder(DataValueKind kind) => kind switch
+    {
+        DataValueKind.Number => "0",
+        DataValueKind.Json => "[ ] ou { }",
+        DataValueKind.Null => "—",
+        _ => "valeur"
+    };
+
+    // -------------------------------------------------------------- modifications
+
+    private async Task SetValueAsync(string key, DataValueKind kind, string? text)
+    {
+        if (Target is null)
+        {
+            return;
+        }
+
+        if (DataValue.TryParse(text, kind, out var value, out var error))
+        {
+            await TrackAsync();
+            Errors.Remove(key);
+            Target.SetDataValue(key, value);
+            await NotifyAsync($"{key} = {DataValue.Describe(value)}");
+            return;
+        }
+
+        // Le modèle reste intact : seule la saisie est refusée, ce qui évite
+        // qu'un caractère tapé à mi-mot soit pris pour une valeur valide.
+        Errors[key] = error ?? "Valeur invalide.";
+    }
+
+    private Task SetBoolAsync(string key, bool value)
+    {
+        if (Target is not null)
+        {
+            Target.SetDataValue(key, value);
+            Errors.Remove(key);
+            return NotifyAsync($"{key} = {value.ToString().ToLowerInvariant()}");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task RenameKeyAsync(string oldKey, string? newKey)
+    {
+        if (Target is null)
+        {
+            return;
+        }
+
+        newKey = newKey?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrEmpty(newKey))
+        {
+            Errors[oldKey] = "La clé ne peut pas être vide.";
+            return;
+        }
+
+        if (string.Equals(oldKey, newKey, StringComparison.Ordinal))
+        {
+            Errors.Remove(oldKey);
+            return;
+        }
+
+        if (Target.HasData(newKey))
+        {
+            Errors[oldKey] = $"La clé « {newKey} » existe déjà.";
+            return;
+        }
+
+        await TrackAsync();
+        Errors.Remove(oldKey);
+
+        if (Target.RenameDataKey(oldKey, newKey))
+        {
+            await NotifyAsync($"{oldKey} → {newKey}");
+        }
+    }
+
+    private async Task ChangeKindAsync(string key, string? type)
+    {
+        if (Target is null || !Enum.TryParse<DataValueKind>(type, out var kind))
+        {
+            return;
+        }
+
+        var current = DataValue.Detect(Target.GetDataValue(key));
+        if (current == kind)
+        {
+            return;
+        }
+
+        // On tente de reconvertir la valeur affichée ; si elle n'a pas de sens dans
+        // le nouveau type, on part d'une valeur neutre plutôt que de refuser.
+        var text = DataValue.Format(Target.GetDataValue(key), current);
+        var converted = DataValue.TryParse(text, kind, out var value, out _)
+            ? value!
+            : Neutral(kind);
+
+        await TrackAsync();
+        Errors.Remove(key);
+        Target.SetDataValue(key, converted);
+
+        await NotifyAsync($"{key} : {DataValue.Label(current)} → {DataValue.Label(kind)}");
+    }
+
+    private Task RemoveKeyAsync(string key)
+    {
+        if (Target is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        Target.RemoveDataValue(key);
+        Errors.Remove(key);
+        return NotifyAsync($"Entrée « {key} » supprimée");
+    }
+
+    private async Task ClearAllAsync()
+    {
+        if (Target is null)
+        {
+            return;
+        }
+
+        await TrackAsync();
+        var count = Target.DataCount;
+        Target.ClearData();
+        Errors.Clear();
+        await NotifyAsync($"{count} entrée(s) supprimée(s)");
+    }
+
+    private async Task AddEntryAsync()
+    {
+        if (Target is null)
+        {
+            return;
+        }
+
+        var key = _newKey.Trim();
+
+        if (string.IsNullOrEmpty(key))
+        {
+            _newError = "La clé ne peut pas être vide.";
+            return;
+        }
+
+        if (Target.HasData(key))
+        {
+            _newError = $"La clé « {key} » existe déjà.";
+            return;
+        }
+
+        if (!DataValue.TryParse(_newKind == DataValueKind.Boolean ? _newBool.ToString() : _newText,
+                _newKind, out var value, out var error))
+        {
+            _newError = error ?? "Valeur invalide.";
+            return;
+        }
+
+        await TrackAsync();
+        Target.SetDataValue(key, value);
+
+        _newKey = string.Empty;
+        _newText = string.Empty;
+        _newBool = false;
+        _newError = null;
+
+        await NotifyAsync($"{key} = {DataValue.Describe(value)}");
+    }
+
+    private static object? Neutral(DataValueKind kind) => kind switch
+    {
+        DataValueKind.Number => 0L,
+        DataValueKind.Boolean => false,
+        DataValueKind.Null => null,
+        DataValueKind.Json => new List<object?>(),
+        _ => string.Empty
+    };
+
+    private async Task TrackAsync()
+    {
+        if (OnTrack.HasDelegate)
+        {
+            await OnTrack.InvokeAsync(this);
+        }
+    }
+
+    private async Task NotifyAsync(string message)
+    {
+        if (OnNotify.HasDelegate)
+        {
+            await OnNotify.InvokeAsync(message);
+        }
+    }
+}

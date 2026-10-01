@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace TestCanvas.Models;
 
 /// <summary>Une arête orientée (ou non) reliant deux nœuds du document.</summary>
-public sealed class GraphEdge : ObservableObject
+public sealed class GraphEdge : GraphElement
 {
     private string _label = string.Empty;
     private string _type = "flow";
@@ -16,7 +16,6 @@ public sealed class GraphEdge : ObservableObject
     private bool _highlighted;
     private double _curvature = 0.25;
     private EdgeStyle _style = EdgeStyle.Straight;
-    private Dictionary<string, object?>? _data;
 
     public GraphEdge()
     {
@@ -108,13 +107,6 @@ public sealed class GraphEdge : ObservableObject
     {
         get => _style;
         set => Set(ref _style, value);
-    }
-
-    /// <summary>Données métier libres, sérialisées avec le graphe.</summary>
-    public Dictionary<string, object?> Data
-    {
-        get => _data ??= new Dictionary<string, object?>();
-        set => Set(ref _data, value);
     }
 
     public bool Involves(string nodeId)

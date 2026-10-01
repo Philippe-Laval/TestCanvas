@@ -322,6 +322,14 @@
             </section>
 
             <section>
+                <h2>Données</h2>
+                <DataEditor Target="DataTarget"
+                           Caption="@DataCaption"
+                           OnTrack="TrackData"
+                           OnNotify="Log" />
+            </section>
+
+            <section>
                 <h2>Arêtes du nœud</h2>
                 @if (_selectedNode is not null && _graph.EdgesOf(_selectedNode.Id).Count > 0)
                 {
@@ -494,11 +502,36 @@
             var alert = new GraphNode("alert", "Alerte", 250, 190, NodeShape.Hexagon, "#f97316");
             _graph.AddNode(alert);
             _graph.AddEdge("e6", "rev", "alert", "si anomalie");
+
+            SeedSampleData(ids);
         }
         finally
         {
             _graph.EndBatch();
         }
+    }
+
+    /// <summary>
+    /// Quelques entrées de démonstration, pour que l'éditeur de données ait
+    /// immédiatement de quoi montrer : les quatre natures de valeur y figurent.
+    /// </summary>
+    private void SeedSampleData(IReadOnlyList<string> ids)
+    {
+        var analyse = _graph.FindNode(ids[2]);
+
+        analyse?.SetDataValue("étape", 3L);
+        analyse?.SetDataValue("critique", true);
+        analyse?.SetDataValue("seuil", 0.75);
+        analyse?.SetDataValue("tags", new List<object?> { "nlp", "v2" });
+
+        _graph.FindNode(ids[3])?.SetDataValue("format", "pdf");
+
+        var step = _graph.FindEdge("e1");
+        step?.SetDataValue("débit", 120L);
+        step?.SetDataValue("vérifié", false);
+
+        // Une valeur nulle : l'éditeur l'affiche sans champ de saisie.
+        _graph.FindEdge("e5")?.SetDataValue("seuil", null);
     }
 
     // ------------------------------------------------------------- outillage C#
@@ -507,6 +540,55 @@
     {
         _history.Track();
         _log.Clear();
+    }
+
+    /// <summary>
+    /// Variante de <see cref="Track"/> pour l'éditeur de données : chaque entrée
+    /// doit être annulable séparément, mais le journal doit survivre à la saisie.
+    /// </summary>
+    private void TrackData() => _history.Track();
+
+    /// <summary>
+    /// Objet dont le dictionnaire <c>Data</c> est édité. L'inspecteur du dessus
+    /// donne la priorité au nœud : on suit le même ordre, sinon les deux panneaux
+    /// parleraient d'objets différents.
+    /// </summary>
+    private GraphElement? DataTarget
+    {
+        get
+        {
+            if (_selectedNode is { } node)
+            {
+                return node;
+            }
+
+            return _graph.SelectedEdge;
+        }
+    }
+
+    /// <summary>Nomme l'objet édité, pour qu'aucune ambiguïté ne subsiste.</summary>
+    private string? DataCaption
+    {
+        get
+        {
+            if (_selectedNode is { } node)
+            {
+                var extra = _graph.SelectedNodes.Count > 1
+                    ? $" (+{_graph.SelectedNodes.Count - 1} autre(s))"
+                    : string.Empty;
+
+                return $"Nœud {node.Id} — {node.Label}{extra}";
+            }
+
+            if (_graph.SelectedEdge is { } edge)
+            {
+                var from = _graph.FindNode(edge.SourceId)?.Label ?? edge.SourceId;
+                var to = _graph.FindNode(edge.TargetId)?.Label ?? edge.TargetId;
+                return $"Arête {edge.Id} — {from} → {to}";
+            }
+
+            return null;
+        }
     }
 
     private void AddNode()

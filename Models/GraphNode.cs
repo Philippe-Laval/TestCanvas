@@ -7,7 +7,7 @@ namespace TestCanvas.Models;
 /// Un nœud du graphe. Les coordonnées sont exprimées dans le repère du graphe
 /// (indépendant du zoom et du panoramique de la vue).
 /// </summary>
-public sealed class GraphNode : ObservableObject
+public sealed class GraphNode : GraphElement
 {
     private string _label = string.Empty;
     private double _x;
@@ -22,7 +22,6 @@ public sealed class GraphNode : ObservableObject
     private bool _locked;
     private bool _visible = true;
     private bool _highlighted;
-    private Dictionary<string, object?>? _data;
 
     public GraphNode()
     {
@@ -130,13 +129,6 @@ public sealed class GraphNode : ObservableObject
     {
         get => _highlighted;
         set => Set(ref _highlighted, value);
-    }
-
-    /// <summary>Données métier libres, sérialisées avec le graphe.</summary>
-    public Dictionary<string, object?> Data
-    {
-        get => _data ??= new Dictionary<string, object?>();
-        set => Set(ref _data, value);
     }
 
     /// <summary>Position courante sous forme de tuple (non sérialisée).</summary>

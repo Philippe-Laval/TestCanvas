@@ -20,6 +20,7 @@ Models/
   GraphDocument.cs     document : nœuds, arêtes, sélection, événements de changement
   GraphNode.cs         nœud (position, forme, couleur, verrou, surbrillance)
   GraphEdge.cs         arête (source/cible, style, flèches, libellé)
+  GraphElement.cs      base de GraphNode/GraphEdge : dictionnaire Data et son ordre
   GraphChange.cs       incréments envoyés au canvas + instantanés
   GraphHistory.cs      annulation / rétablissement par instantané
   Enums.cs             NodeShape, EdgeStyle, GraphChangeKind
@@ -30,10 +31,13 @@ Services/
   LayoutAlgorithms.cs  catalogue des algorithmes (alimente le menu)
   GraphAlgorithms.cs   plus court chemin, graphe accessible, sous-graphe
   GraphSerializer.cs   sérialisation JSON
+  JsonValue.cs         conversion JSON ↔ valeurs CLR du dictionnaire Data
+  DataValue.cs         détection de type, formatage et analyse pour l'éditeur
 
 Components/Graph/
   GraphCanvas.razor    composant Blazor : charge le module JS, relaie les événements
   GraphCanvasBridge.cs [JSInvokable] : callbacks JS -> C#
+  DataEditor.razor      éditeur du dictionnaire Data (nœud ou arête)
 
 wwwroot/js/
   graph-canvas.js      moteur de rendu et d'interaction (module ES)
@@ -365,6 +369,79 @@ Les boucles sont exclues des ressorts des algorithmes de disposition : leur
 « ressort » relierait un nœud à lui-même, donc de distance nulle, et produirait
 une force infinie.
 
+## Données métier (`Data`)
+
+Les nœuds et les arêtes portent un dictionnaire libre `Data`, sérialisé avec le
+graphe. Les deux classes héritent de `GraphElement`, qui centralise l'accès.
+
+### Écrire : passer par les méthodes, pas par l'indexeur
+
+`Dictionary<string, object?>` est un type référence : `node.Data["x"] = 1` ne
+déclenche ni `PropertyChanged` ni l'envoi incrémental au canvas. La propriété reste
+lisible directement, mais toute écriture doit passer par une méthode, qui reconstruit
+le dictionnaire puis notifie :
+
+```csharp
+var noeud = graph.FindNode("n1");
+
+noeud.SetDataValue("étape", 3L);        // ajoute ou remplace
+noeud.RenameDataKey("étape", "rang");  // conserve la position dans le dictionnaire
+noeud.RemoveDataValue("rang");
+noeud.ReplaceData([new("a", 1), new("b", "deux")]);  // en une seule notification
+noeud.ClearData();
+
+graph.FindEdge("e1")?.SetDataValue("débit", 120L);    // même API sur les arêtes
+
+// Lecture
+noeud.HasData("rang");        // false
+noeud.GetDataValue("rang");   // null
+noeud.DataCount;              // 0
+noeud.DataEntries;            // entrées dans l'ordre d'insertion
+```
+
+L'ordre d'insertion est mémorisé à part : `Dictionary` ne garantit pas d'ordre
+d'énumération, et l'éditeur affiche les clés dans l'ordre où elles ont été saisies,
+y compris après une suppression. `DataCount` et `DataEntries` sont `[JsonIgnore]` :
+seul `Data` est sérialisé.
+
+### Types de valeurs
+
+`JsonValue` (dans `Services/`) fait l'aller-retour JSON ↔ CLR et ne produit que des
+types que l'éditeur sait réafficher : `string`, `long`, `double`, `bool`, `null`,
+`List<object?>` et `Dictionary<string, object?>`. Ce sont aussi les types que
+produit l'import JSON, donc un document exporté puis réimporté ne change pas de
+forme.
+
+`DataValue` adapte ces valeurs à l'éditeur : détection du type naturel, formatage
+invariant (le HTML exige un point décimal) et analyse. Un entier saisi reste un
+`long` — « 3 » ne devient pas « 3.0 » au premier aller-retour.
+
+### L'éditeur
+
+Section « Données » du panneau latéral, pour l'objet affiché par l'inspecteur du
+dessus (nœud prioritaire, sinon arête). L'en-tête nomme l'objet, pour qu'aucune
+ambiguïté ne subsiste quand plusieurs nœuds sont sélectionnés.
+
+| Type | Saisie |
+|---|---|
+| Texte | champ libre |
+| Nombre | champ libre, `inputmode="decimal"`, format invariant |
+| Booléen | case à cocher |
+| Nul | aucun champ, la valeur est affichée telle quelle |
+| JSON | champ libre pour un tableau ou un objet |
+
+Règle de conduite : **une saisie refusée ne touche pas le modèle.** Une clé vide, une
+clé en collision, un nombre illisible ou un JSON invalide laissent l'entrée intacte,
+le texte reste dans le champ et un message s'affiche sous la ligne. Rien n'est
+écrit à l'aveugle, ce qui évite qu'un caractère tapé à mi-mot soit pris pour une
+valeur valide.
+
+Changer le type reconvertit la valeur affichée ; si elle n'a pas de sens dans le
+nouveau type, on part d'une valeur neutre (`0`, `false`, `null`, `[]`) plutôt que de
+refuser — le message correspondant apparaît dans le journal.
+
+Chaque modification est une étape d'annulation distincte, sans vider le journal.
+
 ## Sélection
 
 ```csharp
@@ -406,6 +483,21 @@ var tous  = graph.SelectedNodes;
 - ordre latéral des arêtes parallèles conforme à `dot` sur les 28 combinaisons
   de 2, 3 et 4 arêtes (ordre de déclaration, indépendant du sens) — 0 écart,
   et 10 configurations rejouées dans l'application avec le même résultat
+- éditeur de `Data` sur un nœud : les 4 natures de valeur s'affichent avec le bon
+  champ (saisie, case à cocher, `null`, JSON compacté)
+- édition d'un nombre, d'un booléen, d'une valeur nulle et d'un fragment JSON :
+  modèle et canvas mis à jour à chaque fois
+- renommage de clé : valeur conservée, position dans le dictionnaire conservée,
+  collision et clé vide refusées avec message
+- ajout d'une entrée (formulaire vidé après coup) et refus d'une clé déjà utilisée
+- saisie invalide (« pas un nombre ») → message « Nombre attendu. », modèle inchangé
+- changement de type : `Number` → `Boolean` et `Text` → `Number` reconvertissent ;
+  `JSON` → `Nombre` sur `["nlp","v2"]` retombe sur la valeur neutre `0` et le signale
+- suppression d'une entrée et « Tout effacer » ; le bouton se désactive à vide
+- annulation : une étape par saisie, les données reviennent dans le bon ordre
+- changement de cible après une erreur : aucun message résiduel ne réapparaît
+- export puis import JSON : `data` identique à l'octet près, valeur nulle comprise
+- ordre des clés préservé à travers l'éditeur, le renommage et la suppression
 - sélection ciblée des 5 arêtes du graphe de démonstration, une par une
 - bascule orientée / non orientée, type et couleur persistés dans le modèle
 - suppression d'une liaison depuis l'inspecteur (5 → 4 arêtes)
