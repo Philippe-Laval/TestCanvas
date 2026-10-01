@@ -110,8 +110,15 @@ graph.RemoveNode(a.Id);
 // Disposition et algorithmes, entièrement en C#
 GraphLayout.ForceDirected(graph);
 GraphLayout.Hierarchical(graph);
+
 var chemin = GraphAlgorithms.ShortestPath(graph, "n1", "n4");
 graph.SetHighlight(chemin!.Select(n => n.id), null);
+```
+
+Les extrémités du bouton **Chemin le plus court** sont les deux nœuds sélectionnés
+(le nœud primaire en départ, le suivant en arrivée) ; sans sélection multiple, on
+retombe sur le premier nœud du document distinct du nœud sélectionné. S'il n'existe
+aucun chemin, la surbrillance précédente est effacée.
 
 // Sérialisation
 var json = GraphSerializer.Serialize(graph);
@@ -259,6 +266,10 @@ var tous  = graph.SelectedNodes;
 - clic droit → menu contextuel Blazor, actions opérationnelles
 - `Ctrl`+glisser → arête créée (5 → 6 arêtes)
 - chemin le plus court calculé en C# → halo doré sur nœuds et arêtes
+- chemin le plus court sur A-B-C : identique que l'on sélectionne A puis C ou
+  C puis A (3 nœuds, 2 arêtes) — le sens de sélection ne doit pas changer le tracé
+- cible isolée → « Aucun chemin » et surbrillance précédente effacée
+- sélection unique → repli sur le premier nœud distinct du document
 - les 9 algorithmes de disposition du popup appliqués sans erreur : positions
   finies, tous les nœuds distincts, aucune superposition
 - étendue des dispositions force-based cohérente (≈ 400–900 px pour 6 nœuds)
