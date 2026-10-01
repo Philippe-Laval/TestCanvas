@@ -20,9 +20,68 @@
         <button class="btn primary" @onclick="AddNode">Ajouter un nœud</button>
         <button class="btn" @onclick="AddNodeAtCenter">Ajouter au centre</button>
         <button class="btn" @onclick="AddLinkedPair">Ajouter une paire liée</button>
-        <button class="btn" @onclick="RandomizeLayout">Disposition aléatoire</button>
-        <button class="btn" @onclick="RunForceLayout" disabled="@(_graph.NodeCount == 0)">Mise en page forcée</button>
-        <button class="btn" @onclick="RunHierarchicalLayout" disabled="@(_graph.NodeCount == 0)">Disposition hiérarchique</button>
+        <div class="menu-anchor">
+            <button class="btn primary-outline @(_layoutMenuOpen ? "open" : null)"
+                    @onclick="ToggleLayoutMenu"
+                    disabled="@(_graph.NodeCount == 0)"
+                    title="Choisir un algorithme de disposition des nœuds">
+                Disposition <span class="caret">▾</span>
+            </button>
+
+            @if (_layoutMenuOpen)
+            {
+                <div class="popup" @onclick:stopPropagation="true">
+                    <div class="popup-head">
+                        <span>Algorithmes de disposition</span>
+                        <button class="popup-close" @onclick="CloseLayoutMenu" title="Fermer">×</button>
+                    </div>
+
+                    @foreach (var family in Enum.GetValues<LayoutFamily>())
+                    {
+                        var items = LayoutAlgorithms.All.Where(d => d.Family == family).ToList();
+                        if (items.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        <div class="popup-group" title="@LayoutAlgorithms.Describe(family)">
+                            @LayoutAlgorithms.FamilyLabel(family)
+                        </div>
+
+                        @foreach (var descriptor in items)
+                        {
+                            <button class="popup-item @(descriptor.Algorithm == _lastLayout ? "active" : null)"
+                                    disabled="@(_graph.NodeCount == 0)"
+                                    @onclick="() => ApplyLayout(descriptor)">
+                                <span class="popup-name">@descriptor.Name</span>
+                                <span class="popup-summary">@descriptor.Summary</span>
+                            </button>
+                        }
+                    }
+
+                    <div class="popup-params">
+                        <label>
+                            Espacement <span class="param-value">@((int)_layoutOptions.Spacing)</span>
+                            <input type="range" min="60" max="320" step="10"
+                                   value="@_layoutOptions.Spacing"
+                                   @onchange="e => SetSpacing(e.Value?.ToString())" />
+                        </label>
+                        <label>
+                            Itérations <span class="param-value">@_layoutOptions.Iterations</span>
+                            <input type="range" min="25" max="600" step="25"
+                                   value="@_layoutOptions.Iterations"
+                                   @onchange="e => SetIterations(e.Value?.ToString())" />
+                        </label>
+                        <button class="popup-rerun" @onclick="() => ApplyLayout(LayoutAlgorithms.Get(_lastLayout))"
+                                disabled="@(_graph.NodeCount == 0)">
+                            Relancer « @LayoutAlgorithms.Get(_lastLayout).Name »
+                        </button>
+                    </div>
+                </div>
+
+                <div class="popup-backdrop" @onclick="CloseLayoutMenu"></div>
+            }
+        </div>
         <span class="separator"></span>
         <button class="btn" @onclick="HighlightShortestPath" disabled="@(_graph.NodeCount < 2)" title="Calcul du plus court chemin en C#, nœuds et arêtes mis en avant">
             Chemin le plus court
@@ -223,6 +282,9 @@
     private bool _showGrid = true;
     private int _renameCounter;
     private string _zoomText = "zoom 100%";
+    private bool _layoutMenuOpen;
+    private LayoutAlgorithm _lastLayout = LayoutAlgorithm.ForceDirected;
+    private readonly LayoutOptions _layoutOptions = new();
 
     private static readonly string[] Palette =
         ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"];
@@ -391,57 +453,69 @@ private async Task AddNodeAtCenter()
         Log("Ajout d'une paire liée");
     }
 
-    private async Task RandomizeLayout()
+    private void ToggleLayoutMenu() => _layoutMenuOpen = !_layoutMenuOpen;
+
+    private void CloseLayoutMenu() => _layoutMenuOpen = false;
+
+    /// <summary>Applique l'algorithme choisi dans le popup, puis recadre la vue.</summary>
+    private async Task ApplyLayout(LayoutDescriptor descriptor)
     {
         Track();
-        _graph.BeginBatch();
-        try
+
+        _lastLayout = descriptor.Algorithm;
+        descriptor.Apply(_graph, _layoutOptions);
+
+        await FitViewAsync();
+        Log($"Disposition « {descriptor.Name} » appliquée");
+    }
+
+    private void SetSpacing(string? value)
+    {
+        if (double.TryParse(value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.CurrentCulture, out var spacing))
         {
-            foreach (var node in _graph.Nodes.Where(n => !n.Locked))
-            {
-                node.MoveTo(Random.Shared.Next(-450, 450), Random.Shared.Next(-280, 280));
-            }
+            _layoutOptions.Spacing = Math.Clamp(spacing, 60, 320);
         }
-        finally
+    }
+
+    private void SetIterations(string? value)
+    {
+        if (int.TryParse(value, out var iterations))
         {
-            _graph.EndBatch();
+            _layoutOptions.Iterations = Math.Clamp(iterations, 25, 600);
         }
-
-        await FitViewAsync();
-        Log("Positions aléatoires");
     }
 
-    private async Task RunForceLayout()
-    {
-        Track();
-        GraphLayout.ForceDirected(_graph);
-        await FitViewAsync();
-        Log("Mise en page forcée");
-    }
-
-    private async Task RunHierarchicalLayout()
-    {
-        Track();
-        GraphLayout.Hierarchical(_graph);
-        await FitViewAsync();
-        Log("Disposition hiérarchique");
-    }
-
-    /// <summary>Calcule le plus court chemin entre le nœud sélectionné et le premier
-    /// nœud du document, puis met en avant le résultat (purement côté C#).</summary>
+    /// <summary>
+    /// Calcule le plus court chemin et met en avant le résultat (purement côté C#).
+    /// Les extrémités sont les deux nœuds sélectionnés : le nœud primaire en
+    /// départ, le suivant en arrivée. Sans sélection multiple, on retombe sur le
+    /// premier nœud du document distinct du nœud sélectionné.
+    /// </summary>
     private void HighlightShortestPath()
     {
-        var from = _selectedNode ?? _graph.Nodes.FirstOrDefault();
-        var to = _graph.Nodes.FirstOrDefault(n => n.Id != from?.Id);
+        var selected = _graph.SelectedNodes;
 
-        if (from is null || to is null)
+        var from = selected.Count > 0 ? selected[0] : _graph.Nodes.FirstOrDefault();
+        if (from is null)
         {
+            return;
+        }
+
+        var to = selected.Count > 1
+            ? selected[1]
+            : _graph.Nodes.FirstOrDefault(n => n.Id != from.Id);
+
+        if (to is null || to.Id == from.Id)
+        {
+            Log("Sélectionnez deux nœuds distincts pour calculer un chemin");
             return;
         }
 
         var path = GraphAlgorithms.ShortestPath(_graph, from.Id, to.Id);
         if (path is null || path.Count < 2)
         {
+            _graph.ClearHighlight();
             Log($"Aucun chemin entre {from.Label} et {to.Label}");
             return;
         }
@@ -460,7 +534,7 @@ private async Task AddNodeAtCenter()
         }
 
         _graph.SetHighlight(nodeIds, edgeIds);
-        Log($"Chemin : {string.Join(" → ", path.Select(n => n.Label))} ({edgeIds.Count} arêtes)");
+        Log($"Chemin {from.Label} → {to.Label} : {string.Join(" → ", path.Select(n => n.Label))} ({edgeIds.Count} arêtes)");
     }
 
     private void ClearHighlight() => _graph.ClearHighlight();

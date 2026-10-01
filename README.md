@@ -26,7 +26,8 @@ Models/
   ObservableObject.cs  base INotifyPropertyChanged
 
 Services/
-  GraphLayout.cs       mises en page C# : forcée, hiérarchique, grille
+  GraphLayout.cs       mises en page C# : forces, topologie, géométrie
+  LayoutAlgorithms.cs  catalogue des algorithmes (alimente le menu)
   GraphAlgorithms.cs   plus court chemin, graphe accessible, sous-graphe
   GraphSerializer.cs   sérialisation JSON
 
@@ -175,9 +176,63 @@ glisser, et le document est replacé dans le même état — pas de boucle.
 
 ## Page de démonstration
 
-`Components/Pages/Home.razor` : barre d'outils (ajout, dispositions, chemin le
-plus court, annulation), inspecteur de l'élément sélectionné, journal des
-événements, sérialisation JSON, export PNG, menu contextuel Blazor.
+`Components/Pages/Home.razor` : barre d'outils avec popup de choix des algorithmes de
+disposition (groupés par famille, avec réglages *espacement* et *itérations*), ajout de
+nœuds, chemin le plus court, annulation, inspecteur de l'élément sélectionné,
+journal des événements, sérialisation JSON, export PNG, menu contextuel Blazor.
+
+## Algorithmes de disposition
+
+Tous les algorithmes sont calculés en C# et appliqués en une seule notification au
+canvas (via `BeginBatch` / `EndBatch`). Ils sont accessibles depuis le popup
+**Disposition** de la barre d'outils.
+
+### Basées sur les forces (force-based)
+
+Système de forces appliqué entre les nœuds et les arcs : répulsion entre tous les
+nœuds, attraction le long des arêtes, puis itération jusqu'à l'équilibre.
+
+| Algorithme | Principe |
+| --- | --- |
+| Force dirigée | Répulsion de Coulomb (k²/d²) et ressorts de Hooke, avec refroidissement |
+| Fruchterman–Reingold | Forces k²/d et d²/k, déplacement borné par une température décroissante |
+| Spring Embedder (Eades) | Attraction traitée arête par arête ; plus rapide sur les graphes denses |
+| Kamada–Kawai | Relaxation du stress : les distances euclidiennes rejoignent celles du graphe |
+
+### Selon la topologie
+
+| Algorithme | Principe |
+| --- | --- |
+| Hiérarchique | Une couche par profondeur depuis les racines |
+| Radiale | Un cercle par distance au nœud le plus central |
+
+### Géométriques
+
+| Algorithme | Principe |
+| --- | --- |
+| Circulaire | Nœuds sur un anneau, ordonnés par parcours pour limiter les croisements |
+| Grille | Disposition régulière en lignes et colonnes |
+| Aléatoire | Positions tirées au hasard (graine fixe, donc reproductible) |
+
+### Utilisation
+
+```csharp
+// Via le catalogue, comme le fait le menu
+var descriptor = LayoutAlgorithms.Get(LayoutAlgorithm.FruchtermanReingold);
+descriptor.Apply(graph, new LayoutOptions { Spacing = 150, Iterations = 300 });
+
+// Ou directement
+GraphLayout.KamadaKawai(graph);
+```
+
+`LayoutOptions` porte les paramètres communs : `Spacing` (longueur de repos des
+ressorts, ou espacement de base), `Iterations`, `Seed`, `Columns`. Kamada–Kawai
+étant en O(n²) par itération, il bascule automatiquement sur l'algorithme à forces
+au-delà de 220 nœuds.
+
+Les nœuds verrouillés (`Locked`) ne sont jamais déplacés. Les nœuds à degree nul
+peuvent dériver, la répulsion ayant une longue portée : la disposition est donc
+bornée à `Spacing × √n × 6`.
 
 ## Sélection
 
@@ -204,6 +259,11 @@ var tous  = graph.SelectedNodes;
 - clic droit → menu contextuel Blazor, actions opérationnelles
 - `Ctrl`+glisser → arête créée (5 → 6 arêtes)
 - chemin le plus court calculé en C# → halo doré sur nœuds et arêtes
+- les 9 algorithmes de disposition du popup appliqués sans erreur : positions
+  finies, tous les nœuds distincts, aucune superposition
+- étendue des dispositions force-based cohérente (≈ 400–900 px pour 6 nœuds)
+- paramètre d'espacement pris en compte (grille : pas = espacement × 1,2)
+- 60 nœuds / 30 arêtes : les trois algorithmes à forces en ~210 ms
 - sélection multiple : clic puis `Maj`+clic successifs (1 → 2 → 3), retrait par
   `Maj`+clic, rectangle de sélection, « Sélectionner tout »
 - cohérence du nœud primaire entre l'anneau plein du canvas et l'inspecteur
