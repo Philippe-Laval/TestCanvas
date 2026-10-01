@@ -241,6 +241,52 @@ Les nœuds verrouillés (`Locked`) ne sont jamais déplacés. Les nœuds à degr
 peuvent dériver, la répulsion ayant une longue portée : la disposition est donc
 bornée à `Spacing × √n × 6`.
 
+## Arêtes et multigraphe
+
+Une arête porte : `Color`, `Type` (chaîne libre : `flow`, `dépendance`, `retour`…),
+`Label`, `Directed` (flèche ou non), `Width`, `Style`, `Dashed`, `Curvature`,
+`Visible`, `Highlighted` et un dictionnaire `Data`.
+
+```csharp
+var a = graph.AddNode("A");
+var b = graph.AddNode("B");
+
+// Deux liaisons entre le même couple : c'est un multigraphe, autorisé.
+var forward = graph.AddEdge(a.Id, b.Id);
+forward.Type = "dépendance";
+
+var backward = graph.AddEdge(a.Id, b.Id);
+backward.Directed = false;          // pas de flèche
+backward.Type = "retour";
+backward.Color = "#f97316";
+
+graph.ParallelCount(forward);        // 2
+graph.ParallelEdges(forward);        // les deux arêtes du couple
+```
+
+`Ctrl`+glisser entre deux nœuds déjà reliés crée une liaison supplémentaire au lieu
+d'être refusé.
+
+### Rendu des liaisons parallèles
+
+Les arêtes partageant le même couple de nœuds sont groupées (la clé est **non
+orientée** : A→B et B→A partagent le même groupe). Sur k arêtes, la courbure vaut
+`-(k-1)/2 … +(k-1)/2` fois un pas qui s'élargit avec k : les traits se répartissent
+symétriquement de part et d'autre de l'axe et ne se superposent jamais.
+
+```
+   ╭────────╮      3 liaisons parallèles : la courbure ne dépend que du rang
+───╯        ╰───   (ligne droite au milieu)
+```
+
+La courbure propre de l'arête est ignorée au sein d'un groupe, sinon le faisceau
+basculerait d'un bord à l'autre. Une liaison d'un groupe est toujours tracée en
+courbe, c'est la seule façon de la distinguer ; son style personnel s'applique à
+dès qu'elle redevient unique.
+
+Chaque liaison est sélectionnable au clic, puis modifiable (type, couleur, largeur,
+style, sens) ou supprimable depuis l'inspecteur ou le menu contextuel.
+
 ## Sélection
 
 ```csharp
@@ -275,6 +321,11 @@ var tous  = graph.SelectedNodes;
 - étendue des dispositions force-based cohérente (≈ 400–900 px pour 6 nœuds)
 - paramètre d'espacement pris en compte (grille : pas = espacement × 1,2)
 - 60 nœuds / 30 arêtes : les trois algorithmes à forces en ~210 ms
+- multigraphe : 4 liaisons entre deux nœuds, courbures −0,24 / −0,08 / +0,08 /
+  +0,24 et milieux à Y = −22 / −7 / +7 / +22 (faisceau symétrique, traits distincts)
+- sélection ciblée des 5 arêtes du graphe de démonstration, une par une
+- bascule orientée / non orientée, type et couleur persistés dans le modèle
+- suppression d'une liaison depuis l'inspecteur (5 → 4 arêtes)
 - sélection multiple : clic puis `Maj`+clic successifs (1 → 2 → 3), retrait par
   `Maj`+clic, rectangle de sélection, « Sélectionner tout »
 - cohérence du nœud primaire entre l'anneau plein du canvas et l'inspecteur

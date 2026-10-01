@@ -130,6 +130,12 @@ public sealed class GraphCanvasOptions
     /// <summary>Épaisseur du contour des nœuds, en pixels à l'écran.</summary>
     public double NodeBorderWidth { get; set; } = 2;
 
+    /// <summary>
+    /// Écart de courbure entre deux liaisons parallèles d'un multigraphe.
+    /// L'écart réel croît avec le nombre de liaisons du couple.
+    /// </summary>
+    public double ParallelEdgeSpread { get; set; } = 0.16;
+
     /// <summary>Couleur de la sélection (halo).</summary>
     public string SelectionColor { get; set; } = "#38bdf8";
 
@@ -152,6 +158,7 @@ public sealed class GraphCanvasOptions
         ["minZoom"] = MinZoom,
         ["maxZoom"] = MaxZoom,
         ["nodeBorderWidth"] = NodeBorderWidth,
+        ["parallelEdgeSpread"] = ParallelEdgeSpread,
         ["selectionColor"] = SelectionColor,
         ["fontFamily"] = FontFamily,
         ["theme"] = new Dictionary<string, object?>(StringComparer.Ordinal)

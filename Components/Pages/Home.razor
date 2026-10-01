@@ -63,7 +63,7 @@
                         <label>
                             Espacement <span class="param-value">@((int)_layoutOptions.Spacing)</span>
                             <input type="range" min="60" max="320" step="10"
-                                   value="@_layoutOptions.Spacing"
+                                   value="@Num(_layoutOptions.Spacing)"
                                    @onchange="e => SetSpacing(e.Value?.ToString())" />
                         </label>
                         <label>
@@ -148,9 +148,22 @@
                     }
                     else if (_contextMenu.Kind == "edge" && _graph.FindEdge(_contextMenu.Id) is { } edge)
                     {
-                        <div class="context-title">Arête&nbsp;: @edge.SourceId → @edge.TargetId</div>
+                        <div class="context-title">
+                            Arête&nbsp;: @(_graph.FindNode(edge.SourceId)?.Label ?? edge.SourceId)
+                            &rarr; @(_graph.FindNode(edge.TargetId)?.Label ?? edge.TargetId)
+                        </div>
+                        <button @onclick="() => ContextSetDirected(edge, true)">
+                            @(edge.Directed ? "● " : "○ ")Orientée (flèche)
+                        </button>
+                        <button @onclick="() => ContextSetDirected(edge, false)">
+                            @(!edge.Directed ? "● " : "○ ")Non orientée
+                        </button>
+                        <hr />
                         <button @onclick="() => ContextReverseEdge(edge)">Inverser le sens</button>
                         <button @onclick="() => ContextToggleEdgeStyle(edge)">Style&nbsp;: @edge.Style</button>
+                        <button @onclick="() => ContextAddParallelEdge(edge)">
+                            Ajouter une liaison parallèle
+                        </button>
                         <hr />
                         <button class="danger" @onclick="() => ContextDeleteEdge(edge)">Supprimer</button>
                     }
@@ -187,13 +200,13 @@
                         <dd><input type="color" class="input color" value="@node.Fill" @onchange="e => UpdateColor(node, e.Value?.ToString())" /></dd>
                         <dt>Position</dt>
                         <dd>
-                            <input class="input tiny" type="number" step="1" value="@node.X"
-                                   @onchange="e => UpdatePosition(node, e.Value?.ToString(), node.Y.ToString())" />
-                            <input class="input tiny" type="number" step="1" value="@node.Y"
-                                   @onchange="e => UpdatePosition(node, node.X.ToString(), e.Value?.ToString())" />
+                            <input class="input tiny" type="number" step="1" value="@Num(node.X)"
+                                   @onchange="e => UpdatePosition(node, e.Value?.ToString(), Num(node.Y))" />
+                            <input class="input tiny" type="number" step="1" value="@Num(node.Y)"
+                                   @onchange="e => UpdatePosition(node, Num(node.X), e.Value?.ToString())" />
                         </dd>
                         <dt>Rayon</dt>
-                        <dd><input class="input" type="range" min="12" max="70" value="@node.Radius" @oninput="e => UpdateRadius(node, e.Value?.ToString())" /></dd>
+                        <dd><input class="input" type="range" min="12" max="70" value="@Num(node.Radius)" @oninput="e => UpdateRadius(node, e.Value?.ToString())" /></dd>
                         <dt>Verrouillé</dt>
                         <dd><input type="checkbox" checked="@node.Locked" @onchange="e => ToggleLock(node, e.Value)" /></dd>
                     </dl>
@@ -203,8 +216,53 @@
                     <dl class="inspector">
                         <dt>Identifiant</dt>
                         <dd><code>@selectedEdge.Id</code></dd>
+                        <dt>Extrémités</dt>
+                        <dd>
+                            <span class="edge-ends">
+                                @(_graph.FindNode(selectedEdge.SourceId)?.Label ?? selectedEdge.SourceId)
+                                @if (selectedEdge.Directed)
+                                {
+                                    <span class="arrow">&rarr;</span>
+                                }
+                                else
+                                {
+                                    <span class="arrow">&ndash;</span>
+                                }
+                                @(_graph.FindNode(selectedEdge.TargetId)?.Label ?? selectedEdge.TargetId)
+                            </span>
+                            @if (_graph.ParallelCount(selectedEdge) > 1)
+                            {
+                                <span class="badge" title="Plusieurs liaisons entre ces deux nœuds">
+                                    @_graph.ParallelCount(selectedEdge) liaisons parallèles
+                                </span>
+                            }
+                        </dd>
+                        <dt>Type</dt>
+                        <dd>
+                            <input class="input" list="edge-types" value="@selectedEdge.Type"
+                                   @onchange="e => UpdateEdgeType(selectedEdge, e.Value?.ToString())" />
+                            <datalist id="edge-types">
+                                @foreach (var type in EdgeTypes)
+                                {
+                                    <option value="@type"></option>
+                                }
+                            </datalist>
+                        </dd>
                         <dt>Libellé</dt>
                         <dd><input class="input" value="@selectedEdge.Label" @onchange="e => UpdateEdgeLabel(selectedEdge, e.Value?.ToString() ?? string.Empty)" /></dd>
+                        <dt>Sens</dt>
+                        <dd>
+                            <div class="segmented" role="group" aria-label="Sens de la liaison">
+                                <button class="@(selectedEdge.Directed ? "on" : null)"
+                                        @onclick="() => SetEdgeDirected(selectedEdge, true)">Orientée</button>
+                                <button class="@(!selectedEdge.Directed ? "on" : null)"
+                                        @onclick="() => SetEdgeDirected(selectedEdge, false)">Non orientée</button>
+                            </div>
+                        </dd>
+                        <dt>Couleur</dt>
+                        <dd><input type="color" class="input color" value="@selectedEdge.Color" @onchange="e => UpdateEdgeColor(selectedEdge, e.Value?.ToString())" /></dd>
+                        <dt>Épaisseur</dt>
+                        <dd><input class="input" type="range" min="1" max="8" step="0.5" value="@Num(selectedEdge.Width)" @oninput="e => UpdateEdgeWidth(selectedEdge, e.Value?.ToString())" /></dd>
                         <dt>Style</dt>
                         <dd>
                             <select class="input" value="@selectedEdge.Style" @onchange="e => UpdateEdgeStyle(selectedEdge, e.Value?.ToString())">
@@ -216,6 +274,13 @@
                         </dd>
                         <dt>Pointillés</dt>
                         <dd><input type="checkbox" checked="@selectedEdge.Dashed" @onchange="e => ToggleEdgeDashed(selectedEdge, e.Value)" /></dd>
+                        <dt></dt>
+                        <dd>
+                            <div class="row">
+                                <button class="btn" @onclick="() => AddParallelEdge(selectedEdge)">Liaison parallèle</button>
+                                <button class="btn danger" @onclick="() => DeleteEdge(selectedEdge)">Supprimer</button>
+                            </div>
+                        </dd>
                     </dl>
                 }
                 else
@@ -288,6 +353,14 @@
 
     private static readonly string[] Palette =
         ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"];
+
+    /// <summary>Couleurs attribuées aux liaisons parallèles, pour les distinguer.</summary>
+    private static readonly string[] EdgePalette =
+        ["#f97316", "#22d3ee", "#a3e635", "#e879f9", "#fbbf24", "#60a5fa"];
+
+    /// <summary>Types proposés dans la liste déroulante de l'inspecteur.</summary>
+    private static readonly string[] EdgeTypes =
+        ["flow", "dépendance", "retour", "contrainte", "donnée"];
 
     protected override void OnInitialized()
     {
@@ -650,11 +723,29 @@ private void SelectAll()
                 : $"Sélection : {_selectedNode.Label}");
     }
 
+    /// <summary>
+    /// Ctrl+glisser entre deux nœuds. Le multigraphe est autorisé : si une liaison
+    /// existe déjà dans ce sens, on en ajoute une seconde plutôt que de refuser.
+    /// </summary>
     private void OnLinkRequested((string SourceId, string TargetId) link)
     {
         Track();
-        _graph.AddEdge(link.SourceId, link.TargetId);
-        Log($"Arête {_graph.FindNode(link.SourceId)?.Label} → {_graph.FindNode(link.TargetId)?.Label}");
+
+        var source = _graph.FindNode(link.SourceId);
+        var target = _graph.FindNode(link.TargetId);
+        if (source is null || target is null)
+        {
+            return;
+        }
+
+        var existing = _graph.Edges
+            .Count(e => e.SourceId == link.SourceId && e.TargetId == link.TargetId);
+
+        var edge = _graph.AddEdge(link.SourceId, link.TargetId);
+
+        Log(existing > 0
+            ? $"Liaison parallèle n°{existing + 1} : {source.Label} → {target.Label}"
+            : $"Liaison {source.Label} → {target.Label}");
     }
 
     private void OnCanvasDoubleClicked((double X, double Y) position)
@@ -762,6 +853,18 @@ private void SelectAll()
         CloseContextMenu();
     }
 
+    private void ContextSetDirected(GraphEdge edge, bool directed)
+    {
+        edge.Directed = directed;
+        CloseContextMenu();
+    }
+
+    private void ContextAddParallelEdge(GraphEdge edge)
+    {
+        AddParallelEdge(edge);
+        CloseContextMenu();
+    }
+
     private void ContextDeleteEdge(GraphEdge edge)
     {
         Track();
@@ -807,6 +910,45 @@ private void SelectAll()
 
     private void UpdateEdgeLabel(GraphEdge edge, string value) => edge.Label = value;
 
+    private void UpdateEdgeType(GraphEdge edge, string? value) => edge.Type = value ?? string.Empty;
+
+    private void SetEdgeDirected(GraphEdge edge, bool directed)
+    {
+        edge.Directed = directed;
+        Log($"Liaison {edge.Id} : {(directed ? "orientée" : "non orientée")}");
+    }
+
+    private void UpdateEdgeColor(GraphEdge edge, string? color)
+    {
+        if (!string.IsNullOrWhiteSpace(color))
+        {
+            edge.Color = color;
+        }
+    }
+
+    private void UpdateEdgeWidth(GraphEdge edge, string? value) => edge.Width = Parse(value, edge.Width);
+
+    /// <summary>Duplique une liaison entre les mêmes deux nœuds (multigraphe).</summary>
+    private void AddParallelEdge(GraphEdge edge)
+    {
+        Track();
+        var count = _graph.ParallelCount(edge);
+        var created = _graph.AddEdge(edge.SourceId, edge.TargetId, string.Empty);
+
+        created.Type = edge.Type;
+        created.Color = EdgePalette[(count - 1 + EdgePalette.Length) % EdgePalette.Length];
+        _graph.SelectEdge(created.Id);
+
+        Log($"Liaison parallèle créée ({count} au total) : {created.Id}");
+    }
+
+    private void DeleteEdge(GraphEdge edge)
+    {
+        Track();
+        _graph.RemoveEdge(edge.Id);
+        Log($"Liaison supprimée : {edge.Id}");
+    }
+
     private void UpdateEdgeStyle(GraphEdge edge, string? style)
     {
         if (Enum.TryParse<EdgeStyle>(style, out var parsed))
@@ -818,10 +960,25 @@ private void SelectAll()
     private void ToggleEdgeDashed(GraphEdge edge, object? value) => edge.Dashed = value is true;
 
     private static double Parse(string? text, double fallback)
-        => double.TryParse(text, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.CurrentCulture, out var value)
-            ? value
-            : fallback;
+    {
+        // Les champs <input type="number"> et "range" sont normalisés avec un point
+        // décimal par le navigateur : le format invariant est donc prioritaire.
+        return double.TryParse(text, System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out var value)
+               ? value
+               : double.TryParse(text, System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.CurrentCulture, out var local)
+                   ? local
+                   : fallback;
+    }
+
+    /// <summary>
+    /// Formatage des valeurs numériques destinées aux champs de formulaire.
+    /// Le HTML exige un point décimal, quelle que soit la culture de l'interface :
+    /// sans cela, « 15,48 » est rejeté et la saisie se fige.
+    /// </summary>
+    private static string Num(double value)
+        => value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
 
     // ---------------------------------------------------------- sérialisation
 

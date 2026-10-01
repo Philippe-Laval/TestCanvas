@@ -6,6 +6,7 @@ namespace TestCanvas.Models;
 public sealed class GraphEdge : ObservableObject
 {
     private string _label = string.Empty;
+    private string _type = "flow";
     private string _color = "#64748b";
     private double _width = 2;
     private bool _dashed;
@@ -41,6 +42,16 @@ public sealed class GraphEdge : ObservableObject
     {
         get => _label;
         set => Set(ref _label, value);
+    }
+
+    /// <summary>
+    /// Type métier de l'arête (chaîne libre) : « flux », « dépendance », « retour »…
+    /// Utilisé pour le filtrage et la mise en forme, sérialisé avec le graphe.
+    /// </summary>
+    public string Type
+    {
+        get => _type;
+        set => Set(ref _type, value ?? string.Empty);
     }
 
     public string Color
@@ -116,6 +127,7 @@ public sealed class GraphEdge : ObservableObject
         SourceId = SourceId,
         TargetId = TargetId,
         Label = Label,
+        Type = Type,
         Color = Color,
         Width = Width,
         Dashed = Dashed,

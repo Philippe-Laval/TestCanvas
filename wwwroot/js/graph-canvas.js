@@ -50,6 +50,7 @@ class GraphCanvas {
             maxZoom: 5,
             panSpeed: 1,
             nodeBorderWidth: 2,
+            parallelEdgeSpread: 0.16,
             selectionColor: '#38bdf8',
             fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
             theme: {
@@ -71,6 +72,10 @@ class GraphCanvas {
 
         this.nodes = new Map();
         this.edges = new Map();
+
+        // Arêtes partageant le même couple de nœuds (multigraphe), recalculé à
+        // chaque modification du document.
+        this.pairGroups = new Map();
 
         this.view = { x: 0, y: 0, zoom: 1 };
         this.dpr = window.devicePixelRatio || 1;
@@ -260,7 +265,7 @@ class GraphCanvas {
             }
         }
 
-        this.invalidate();
+        this.rebuildPairGroups();
     }
 
     normalizeNode(node) {
@@ -288,6 +293,7 @@ class GraphCanvas {
             sourceId: String(edge.sourceId),
             targetId: String(edge.targetId),
             label: edge.label == null ? '' : String(edge.label),
+            type: edge.type == null ? '' : String(edge.type),
             color: edge.color || '#94a3b8',
             width: Number(edge.width) || 2,
             dashed: !!edge.dashed,
@@ -363,7 +369,9 @@ class GraphCanvas {
                 break;
         }
 
-        this.invalidate();
+        // Le groupement des arêtes parallèles dépend de la topologie : il doit
+        // être refait dès qu'une arête apparaît ou disparaît.
+        this.rebuildPairGroups();
     }
 
     applyChanges(changes) {
@@ -582,12 +590,74 @@ class GraphCanvas {
             return null;
         }
 
+        const group = this.pairGroups.get(this.pairKey(edge));
+
+        // Multigraphe : la courbure dépend du seul rang dans le faisceau. La
+        // courbure propre de l'arête est ignorée ici, sinon le faisceau se
+        // décalerait d'un bord à l'autre au lieu de rester symétrique.
+        if (group && group.length > 1) {
+            return this.computePath(source, target, 'Curved', this.parallelOffset(edge));
+        }
+
         return this.computePath(source, target, edge.style, edge.curvature);
+    }
+
+    /**
+     * Clé d'un couple de nœuds, indépendante du sens : A→B et B→A partagent le
+     * même couple. C'est ce qui permet de décaler les arêtes parallèles d'un
+     * multigraphe.
+     */
+    pairKey(edge) {
+        return edge.sourceId < edge.targetId
+            ? `${edge.sourceId}|${edge.targetId}`
+            : `${edge.targetId}|${edge.sourceId}`;
+    }
+
+    /**
+     * Écart de courbure à appliquer à une arête lorsqu'elle partage ses deux
+     * extrémités avec d'autres. Sur k arêtes parallèles, les écarts sont répartis
+     * symétriquement autour de zéro : (-(k-1)/2 … +(k-1)/2), ce qui écarte les
+     * traits sans jamais les superposer.
+     */
+    parallelOffset(edge) {
+        const group = this.pairGroups.get(this.pairKey(edge));
+
+        if (!group || group.length < 2) {
+            return 0;
+        }
+
+        const index = Math.max(0, group.indexOf(edge.id));
+        const centered = index - (group.length - 1) / 2;
+
+        // Sur k arêtes, les écarts valent -(k-1)/2 … +(k-1)/2 : les traits se
+        // répartissent de part et d'autre de l'axe, symétriquement. Le pas
+        // s'élargit avec k pour que l'écart reste lisible.
+        const step = this.options.parallelEdgeSpread * (1 + 0.25 * (group.length - 2));
+
+        return centered * step;
+    }
+
+    /** Recalcule le groupement des arêtes parallèles (invalidé à chaque changement). */
+    rebuildPairGroups() {
+        const groups = new Map();
+
+        for (const edge of this.edges.values()) {
+            const key = this.pairKey(edge);
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+
+            groups.get(key).push(edge.id);
+        }
+
+        this.pairGroups = groups;
+        this.invalidate();
     }
 
     /**
      * Calcule la géométrie d'une arête, tronquée aux frontières des nœuds afin
      * que le trait ne passe jamais « sous » les formes.
+     * @param {number} curvature courbure relative (0 = droite).
      */
     computePath(source, target, style, curvature) {
         const dx = target.x - source.x;
@@ -604,7 +674,11 @@ class GraphCanvas {
         const x2 = target.x - Math.cos(angle) * endOffset;
         const y2 = target.y - Math.sin(angle) * endOffset;
 
-        if (style === 'Orthogonal') {
+        // Un groupe d'arêtes parallèles est toujours courbé : c'est la seule façon
+        // de les distinguer sans multiplier les styles de tracé.
+        const effectiveStyle = style;
+
+        if (effectiveStyle === 'Orthogonal') {
             const midX = (x1 + x2) / 2;
             return {
                 type: 'orthogonal',
@@ -619,7 +693,7 @@ class GraphCanvas {
             };
         }
 
-        if (style === 'Curved') {
+        if (effectiveStyle === 'Curved') {
             const mx = (x1 + x2) / 2;
             const my = (y1 + y2) / 2;
             const offset = distance * curvature;
@@ -1778,6 +1852,22 @@ export function downloadPng(canvas, fileName = 'graphe.png', type = 'image/png',
     link.click();
     link.remove();
     return true;
+}
+
+/** Géométrie calculée de chaque arête : diagnostic du rendu des liaisons parallèles. */
+export function getEdgeGeometries(canvas) {
+    return useInstance(canvas, instance => [...instance.edges.values()].map(edge => {
+        const geometry = instance.edgeGeometry(edge);
+        return {
+            id: edge.id,
+            sourceId: edge.sourceId,
+            targetId: edge.targetId,
+            parallelOffset: Number(instance.parallelOffset(edge).toFixed(4)),
+            type: geometry ? geometry.type : null,
+            midX: geometry ? Math.round(geometry.label.x) : null,
+            midY: geometry ? Math.round(geometry.label.y) : null
+        };
+    }));
 }
 
 export function screenToGraph(canvas, offsetX, offsetY) {

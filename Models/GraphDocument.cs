@@ -67,12 +67,8 @@ public sealed class GraphDocument
             throw new InvalidOperationException($"Un nœud avec l'identifiant « {node.Id} » existe déjà.");
         }
 
-        if (_nodes.Count == 0)
-        {
-            node.X = 0;
-            node.Y = 0;
-        }
-
+        // Les coordonnées fournies par l'appelant sont respectées : les
+        // surcharger ici revenait à décaler le tout premier nœud ajouté.
         _nodes.Add(node);
         _nodesById[node.Id] = node;
         _incidentEdges.TryAdd(node.Id, []);
@@ -310,6 +306,38 @@ public sealed class GraphDocument
     public GraphNode? PrimarySelectedNode => SelectedNodes.Count > 0 ? SelectedNodes[0] : null;
 
     public GraphEdge? SelectedEdge => FindEdge(_selectedEdgeId);
+
+    /// <summary>
+    /// Nombre d'arêtes reliant le même couple de nœuds que <paramref name="edge"/>,
+    /// celle-ci comprise. C'est ce qui distingue un multigraphe d'un graphe simple.
+    /// </summary>
+    public int ParallelCount(GraphEdge edge)
+    {
+        if (edge is null)
+        {
+            return 0;
+        }
+
+        return _edges.Count(e =>
+            (e.SourceId == edge.SourceId && e.TargetId == edge.TargetId)
+            || (e.SourceId == edge.TargetId && e.TargetId == edge.SourceId));
+    }
+
+    /// <summary>Arêtes partageant le même couple de nœuds que l'arête donnée.</summary>
+    public IReadOnlyList<GraphEdge> ParallelEdges(GraphEdge edge)
+    {
+        if (edge is null)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. _edges.Where(e =>
+                (e.SourceId == edge.SourceId && e.TargetId == edge.TargetId)
+                || (e.SourceId == edge.TargetId && e.TargetId == edge.SourceId))
+        ];
+    }
 
     /// <summary>Sélectionne un nœud (ou rien si <paramref name="id"/> est null).</summary>
     public void SelectNode(string? id, bool additive = false)
