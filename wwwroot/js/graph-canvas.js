@@ -799,8 +799,14 @@ class GraphCanvas {
         // répartissent de part et d'autre de l'axe, symétriquement. Le pas
         // s'élargit avec k pour que l'écart reste lisible.
         const step = this.options.parallelEdgeSpread * (1 + 0.25 * (group.length - 2));
+        const offset = centered * step;
 
-        return centered * step;
+        // Le côté de la courbe dépend déjà du sens de parcours : tracer A->B
+        // puis B->A inverse l'angle. Sans correction, une arête dans chaque sens
+        // recevrait deux décalages opposés qui s'annulent, et les deux arcs se
+        // superposeraient exactement. L'écart est donc ramené à un sens
+        // canonique du couple, l'identifiant le plus petit en tête.
+        return edge.sourceId > edge.targetId ? -offset : offset;
     }
 
     /** Recalcule le groupement des arêtes parallèles (invalidé à chaque changement). */

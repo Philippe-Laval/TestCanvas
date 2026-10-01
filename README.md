@@ -288,6 +288,19 @@ basculerait d'un bord à l'autre. Une liaison d'un groupe est toujours tracée e
 courbe, c'est la seule façon de la distinguer ; son style personnel s'applique à
 dès qu'elle redevient unique.
 
+**Sens de parcours.** Le côté d'un arc dépend déjà du sens de tracé : parser A→B
+puis B→A inverse l'angle. Sans correction, une arête dans chaque sens recevrait
+deux décalages opposés qui s'annulent, et les deux arcs se superposeraient
+exactement. L'écart est donc ramené à un **sens canonique du couple**
+(identifiant le plus petit en tête). Un digon A→B / B→A donne alors deux arcs de
+courbure identique qui se bombent en sens contraires, flèches vers les
+extrémités correspondantes :
+
+```
+ A ╭──▶ B        A ◀──╯
+ A ◀──╯      ⟺   A ──▶ B
+```
+
 Chaque liaison est sélectionnable au clic, puis modifiable (type, couleur, largeur,
 style, sens) ou supprimable depuis l'inspecteur ou le menu contextuel.
 
@@ -367,6 +380,8 @@ var tous  = graph.SelectedNodes;
 - 60 nœuds / 30 arêtes : les trois algorithmes à forces en ~210 ms
 - multigraphe : 4 liaisons entre deux nœuds, courbures −0,24 / −0,08 / +0,08 /
   +0,24 et milieux à Y = −22 / −7 / +7 / +22 (faisceau symétrique, traits distincts)
+- sens opposés : A→B puis B→A donnent deux arcs distincts (milieux à −7 et +7)
+  au lieu de se recouvrir ; A→B, B→A, A→B donnent trois arcs à −18 / 0 / +18
 - sélection ciblée des 5 arêtes du graphe de démonstration, une par une
 - bascule orientée / non orientée, type et couleur persistés dans le modèle
 - suppression d'une liaison depuis l'inspecteur (5 → 4 arêtes)
