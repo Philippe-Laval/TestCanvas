@@ -15,7 +15,7 @@ public sealed class GraphDocument
     private readonly Dictionary<string, GraphEdge> _edgesById = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<GraphEdge>> _incidentEdges = new(StringComparer.Ordinal);
     // Liste ordonnée plutôt qu'un HashSet : le premier élément est le nœud
-// « primaire », celui_cliqué en dernier, que le canvas met en avant.
+    // « primaire », celui_cliqué en dernier, que le canvas met en avant.
     private readonly List<string> _selectedNodeIds = [];
 
     private string? _selectedEdgeId;
