@@ -1,5 +1,3 @@
 <Solution>
-  <Project Path="../TestCanvasBlazor/TestCanvasBlazor.Client/TestCanvasBlazor.Client.csproj" Id="06973c98-2ba7-44d8-a460-580ffbf9c739" />
-  <Project Path="../TestCanvasBlazor/TestCanvasBlazor/TestCanvasBlazor.csproj" Id="3e4addb3-76bb-4dfc-a4fd-216594b953f9" />
   <Project Path="TestCanvas.csproj" />
 </Solution>
